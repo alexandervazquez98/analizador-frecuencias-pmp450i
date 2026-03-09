@@ -1,0 +1,43 @@
+services:
+  tower-scan-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tower-scan-automation-V2
+    ports:
+      - "5002:5000"
+    environment:
+      - FLASK_APP=app.web_app
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - DEFAULT_SNMP_COMMUNITY=Canopy
+      - DEFAULT_TARGET_RECEIVE_LEVEL=-52
+      - DEFAULT_MIN_SNR=32
+      - DEFAULT_MAX_POLARIZATION_DIFF=5
+      - CNMAESTRO_URL=${CNMAESTRO_URL}
+      - CNMAESTRO_ID=${CNMAESTRO_ID}
+      - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      # Mapear código fuente para desarrollo
+      - ./app:/app/app
+      - ./static:/app/static
+      # Mapear carpeta de logs
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - tower-scan-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  tower-scan-network:
+    driver: bridge
+
+volumes:
+  logs:
+    driver: local

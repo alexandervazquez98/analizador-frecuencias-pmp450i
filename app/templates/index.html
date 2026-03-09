@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Scan - PMP 450i Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
+</head>
+
+<body>
+    <div class="container-fluid p-4 d-flex flex-column vh-100" style="overflow: hidden;">
+        <!-- Header -->
+        <header class="header mb-4 text-center">
+            <div class="logo">
+                <h1 class="display-5 fw-bold"><i class="bi bi-broadcast-pin text-primary"></i> Tower Scan Automation
+                </h1>
+                <p class="lead text-muted">Cambium PMP 450i - Analizador de Frecuencias & Optimización Uplink</p>
+            </div>
+        </header>
+
+        <div class="row g-3 flex-grow-1" style="min-height: 0;">
+            <!-- Left Column: Config + Logs (Quadrants 1 & 3) -->
+            <div class="col-md-6 d-flex flex-column gap-3 h-100">
+                <!-- Config Card (Auto Height) -->
+                <div class="card shadow-sm border-0 d-flex flex-column"
+                    style="background: var(--card-bg); flex-shrink: 0;">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="bi bi-gear-fill"></i> Configuración</h5>
+                    </div>
+                    <div class="card-body overflow-auto">
+                        <!-- Community -->
+                        <div class="mb-3">
+                            <label class="form-label text-light small">Comunidad SNMP</label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                id="snmpCommunity" value="MEXI2-BB-RW, MEXI2-BB-RO, MEXI2BBRW, MEXI2BBRO">
+                            <div class="form-text text-muted" style="font-size: 0.7em;">Puede incluir múltiples
+                                separadas por coma</div>
+                        </div>
+
+                        <!-- Basic Params -->
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label text-light small">Target Rx (dBm)</label>
+                                <input type="number"
+                                    class="form-control form-control-sm bg-dark text-light border-secondary"
+                                    id="targetRxLevel" value="-52">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label text-light small">Ancho Canal</label>
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary"
+                                    id="channelWidth">
+                                    <option value="5">5 MHz</option>
+                                    <option value="10">10 MHz</option>
+                                    <option value="15">15 MHz</option>
+                                    <option value="20" selected>20 MHz</option>
+                                    <option value="30">30 MHz</option>
+                                    <option value="40">40 MHz</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Advanced Options -->
+                        <div class="accordion" id="advancedOptions">
+                            <div class="accordion-item bg-transparent border-secondary">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed bg-dark text-light py-2" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#collapseAdv">
+                                        <i class="bi bi-sliders me-2"></i> Opciones Avanzadas
+                                    </button>
+                                </h2>
+                                <div id="collapseAdv" class="accordion-collapse collapse"
+                                    data-bs-parent="#advancedOptions">
+                                    <div class="accordion-body text-light small">
+                                        <label class="form-label">Preferencias de Análisis</label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="prioritizeUplink"
+                                                checked>
+                                            <label class="form-check-label">Priorizar Uplink (CCTV)</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="stabilityOverSpeed"
+                                                checked>
+                                            <label class="form-check-label">Estabilidad > Velocidad</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent History -->
+                        <div class="mt-4">
+                            <h6 class="text-muted border-bottom pb-2 small"><i class="bi bi-clock-history"></i>
+                                Historial Reciente</h6>
+                            <div id="recentScans" class="list-group list-group-flush small"
+                                style="max-height: 120px; overflow-y: auto;">
+                                <div class="text-center text-muted p-2">Cargando...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Log Panel (New Persistent Location) -->
+                <div class="card shadow-sm border-0 flex-fill d-flex flex-column"
+                    style="background: var(--card-bg); min-height: 0;">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 small"><i class="bi bi-terminal-fill"></i> Log de Ejecución</h6>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input form-check-input-sm" type="checkbox" id="detailedLogToggle">
+                            <label class="form-check-label text-muted small" style="font-size: 0.7rem;"
+                                for="detailedLogToggle">Verbose</label>
+                        </div>
+                    </div>
+                    <div class="card-body p-0 d-flex flex-column overflow-hidden">
+                        <div id="logOutput" class="p-2 small font-monospace text-light flex-grow-1"
+                            style="overflow-y: auto; background: #1a1a1a;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Targets + Results (Quadrants 2 & 4) -->
+            <div class="col-md-6 d-flex flex-column gap-3 h-100">
+                <!-- Targets Card (Auto Height) -->
+                <div class="card shadow-sm border-0 d-flex flex-column"
+                    style="background: var(--card-bg); flex-shrink: 0;">
+                    <div class="card-header bg-info text-dark d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-broadcast-pin"></i> Objetivos</h5>
+                        <button class="btn btn-sm btn-dark" id="openImportModalBtn"><i class="bi bi-cloud-arrow-up"></i>
+                            Importar</button>
+                    </div>
+                    <div class="card-body d-flex flex-column overflow-hidden">
+                        <div class="row g-2 flex-grow-1">
+                            <div class="col-md-6 d-flex flex-column">
+                                <label class="form-label text-light small">IPs de APs (Una por línea)</label>
+                                <textarea
+                                    class="form-control form-control-sm bg-dark text-light border-secondary flex-grow-1"
+                                    id="apIPs" style="resize: none; min-height: 150px;"
+                                    placeholder="10.53.X.X"></textarea>
+                                <input type="file" id="apFileUpload"
+                                    class="form-control form-control-sm mt-1 bg-secondary border-0" accept=".txt,.csv">
+                            </div>
+                            <div class="col-md-6 d-flex flex-column">
+                                <label class="form-label text-light small">IPs de SMs (Opcional)</label>
+                                <textarea
+                                    class="form-control form-control-sm bg-dark text-light border-secondary flex-grow-1"
+                                    id="smIPs" style="resize: none; min-height: 150px;"
+                                    placeholder="10.53.X.Y"></textarea>
+                                <input type="file" id="smFileUpload"
+                                    class="form-control form-control-sm mt-1 bg-secondary border-0" accept=".txt,.csv">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 text-end">
+                        <button id="clearBtn" class="btn btn-outline-secondary btn-sm me-2">Limpiar</button>
+                        <button id="startScanBtn" class="btn btn-primary btn-sm px-4 fw-bold">
+                            <i class="bi bi-play-circle-fill"></i> Iniciar Análisis
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quadrant 4: Results / Status / Welcome (Bottom Right) -->
+                <div class="flex-fill position-relative d-flex flex-column" style="min-height: 0;">
+                    <!-- Status Panel -->
+                    <div id="statusPanel" class="card shadow-lg border-0 w-100 h-100"
+                        style="background: var(--card-bg); display: none;">
+                        <div class="card-body text-center p-5">
+                            <h2 class="mb-4 text-white">Escanendo Red...</h2>
+                            <div class="status-badge mb-3 text-white" id="statusBadge">Iniciando...</div>
+                            <p class="text-light">Scan ID: <span id="scanIdDisplay">-</span></p>
+
+                            <div class="progress mb-3" style="height: 25px;">
+                                <div id="progressFill"
+                                    class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                                    role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <p id="progressText" class="fw-bold text-white">0%</p>
+                        </div>
+                    </div>
+
+                    <!-- Results Panel -->
+                    <div id="resultsPanel" class="card shadow-lg border-0 w-100 h-100 d-flex flex-column"
+                        style="background: var(--card-bg); display: none;">
+                        <div
+                            class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h4 class="mb-0"><i class="bi bi-check-circle-fill"></i> Resultados del Análisis</h4>
+                            <div>
+                                <button id="globalSpectrumBtn" class="btn btn-info btn-sm me-2" style="display:none;"><i
+                                        class="bi bi-graph-up"></i>
+                                    Ver Espectro</button>
+                                <button id="exportResultsBtn" class="btn btn-light btn-sm"><i
+                                        class="bi bi-download"></i>
+                                    JSON</button>
+                                <button id="newScanBtn" class="btn btn-outline-light btn-sm"><i
+                                        class="bi bi-arrow-repeat"></i>
+                                    Nuevo</button>
+                            </div>
+                        </div>
+                        <div class="card-body overflow-auto">
+                            <div id="resultsSummary" class="mb-4"></div>
+
+                            <ul class="nav nav-tabs mb-3" id="resultsTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="recommendations-tab" data-bs-toggle="tab"
+                                        data-bs-target="#recommendations-pane" type="button" role="tab"><i
+                                            class="bi bi-star-fill"></i> Recomendaciones</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="installation-tab" data-bs-toggle="tab"
+                                        data-bs-target="#installation-pane" type="button" role="tab"><i
+                                            class="bi bi-file-earmark-text"></i> Ficha de Instalación</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="details-tab" data-bs-toggle="tab"
+                                        data-bs-target="#details-pane" type="button" role="tab"><i
+                                            class="bi bi-list-task"></i>
+                                        Detalles Técnicos</button>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content" id="resultsContent">
+                                <div class="tab-pane fade show active" id="recommendations-pane" role="tabpanel">
+                                    <div id="frequencyRecommendations"></div>
+                                </div>
+                                <div class="tab-pane fade" id="installation-pane" role="tabpanel">
+                                    <div id="installationSheetContent"></div>
+                                </div>
+                                <div class="tab-pane fade" id="details-pane" role="tabpanel">
+                                    <div class="alert alert-info">Seleccione un AP para ver su espectro completo.</div>
+                                    <div id="spectrumViewerPlaceholder"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Welcome Placeholder -->
+                    <div id="welcomePanel"
+                        class="text-center py-5 text-muted d-flex flex-column justify-content-center h-100">
+                        <div>
+                            <i class="bi bi-tower display-1 opacity-25"></i>
+                            <h3 class="mt-3">Listo para escanear</h3>
+                            <p>Configure los parámetros a la izquierda e inicie el proceso.</p>
+                        </div>
+                    </div>
+                </div>
+            </div> <!-- End Right Column (col-md-6) -->
+        </div> <!-- End Row -->
+
+        <!-- Footer -->
+        <footer class="text-center mt-5 text-muted small">
+            <p>&copy; 2026 Tower Scan Automation | <i class="bi bi-lightning-fill text-warning"></i> Powered by Python +
+                Flask + Docker</p>
+        </footer>
+    </div>
+
+    <!-- Spectrum Viewer Modal -->
+    <div class="modal fade" id="spectrumModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-graph-up"></i> Visualizador de Espectro - <span
+                            id="spectrumModalTitle">AP</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <canvas id="spectrumChart" style="max-height: 500px;"></canvas>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <small class="text-muted me-auto">Datos en tiempo real obtenidos del radio AP.</small>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recommendations Text Modal -->
+    <div class="modal fade" id="textRecommendationsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-clipboard-check"></i> Guía de Configuración</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="textRecommendationsContent" class="p-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="workOrderModal" class="modal work-order-modal">
+        <div class="modal-content wo-content">
+            <div class="wo-header">
+                <h2>Orden de Trabajo</h2>
+                <span class="wo-id" id="woIdDisplay">WO-PING</span>
+            </div>
+            <div id="workOrderContent" class="wo-body"></div>
+            <div class="wo-footer">
+                <button id="acknowledgeBtn" class="btn btn-success w-100">CONFIRMAR (ACK)</button>
+                <button id="closeWoBtn" class="btn btn-secondary mt-2">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CMMAESTRO IMPORT MODAL -->
+    <div id="importModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" id="closeImportModal">&times;</span>
+            <h2><i class="bi bi-cloud-arrow-down-fill text-primary"></i> Importar de cnMaestro</h2>
+
+            <div class="step-container" id="importWizard">
+                <!-- Step 1: Loading -->
+                <div id="stepLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Cargando inventario...</p>
+                </div>
+
+                <!-- Step 2: Selection -->
+                <div id="stepSelection" style="display:none;">
+                    <div class="mb-3">
+                        <label class="form-label">Municipio / Red</label>
+                        <select id="networkSelect" class="form-select"></select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Torre</label>
+                        <select id="towerSelect" class="form-select" disabled></select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Access Point (AP)</label>
+                        <select id="apSelect" class="form-select" disabled></select>
+                    </div>
+
+                    <div class="alert alert-info mt-3" id="smPreviewBox" style="display:none;">
+                        <strong><i class="bi bi-info-circle"></i> SMs Asociados:</strong>
+                        <span id="smCountBadge">0</span>
+                        <div class="sm-list-preview" id="smListPreview"
+                            style="max-height: 100px; overflow-y: auto; font-size: 0.8rem; margin-top: 5px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer mt-4">
+                <button id="confirmImportBtn" class="btn btn-primary w-100" disabled>
+                    Importar AP y SMs Seleccionados
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=10"></script>
+</body>
+
+</html>

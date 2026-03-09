@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radiografía de Espectro - AP {{ ap_ip }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+    <!-- Chart.js & Plugins -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
+
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background-color: #1e1e1e;
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .toolbar {
+            background-color: #252525;
+            padding: 0.5rem;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            border-bottom: 1px solid #333;
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            padding: 1rem;
+            width: 100%;
+            background-color: #181818;
+        }
+
+        .controls {
+            background-color: #1e1e1e;
+            padding: 0.5rem;
+            border-top: 1px solid #333;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div>
+            <h5 class="m-0 text-info"><i class="bi bi-activity"></i> Análisis de Espectro - AP {{ ap_ip }}</h5>
+            <small class="text-muted">ID: {{ scan_id }}</small>
+        </div>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="window.close()">
+                <i class="bi bi-x-lg"></i> Cerrar
+            </button>
+        </div>
+    </div>
+
+    <!-- Visual Tools -->
+    <div class="toolbar">
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-light active" id="modePanBtn" onclick="setMode('pan')">
+                <i class="bi bi-arrows-move"></i> Navegar
+            </button>
+            <button type="button" class="btn btn-outline-light" id="modeMarkerBtn" onclick="setMode('marker')">
+                <i class="bi bi-geo-alt-fill"></i> Marcador
+            </button>
+            <button type="button" class="btn btn-outline-light" id="modeEraserBtn" onclick="setMode('eraser')">
+                <i class="bi bi-eraser-fill"></i> Borrador
+            </button>
+        </div>
+        <div class="vr bg-secondary mx-2"></div>
+        <button class="btn btn-outline-info btn-sm" onclick="resetZoom()">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset Zoom
+        </button>
+        <button class="btn btn-outline-danger btn-sm" onclick="clearMarkers()">
+            <i class="bi bi-trash"></i> Borrar Todo
+        </button>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="spectrumChart"></canvas>
+    </div>
+
+    <div class="controls">
+        <span class="badge bg-secondary me-2">AP (Fondo)</span>
+        <span class="badge bg-info text-dark me-3">SMs (Líneas)</span>
+        <span class="text-muted border-start ps-3" id="helpText">
+            <i class="bi bi-mouse"></i> Rueda: Zoom | Arrastrar: Pan
+        </span>
+    </div>
+
+    <script>
+        const scanId = "{{ scan_id }}";
+        const apIp = "{{ ap_ip }}";
+        let chartInstance = null;
+        let currentMode = 'pan'; // 'pan', 'marker', 'eraser'
+        let markers = {}; // id -> value
+
+        const CHART_COLORS = [
+            '#FF5722', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5',
+            '#00BCD4', '#009688', '#4CAF50', '#8BC34A', '#CDDC39'
+        ];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Fetch scan data
+                const response = await fetch(`/api/results/${scanId}`);
+                if (!response.ok) throw new Error("Error obteniendo datos");
+
+                const data = await response.json();
+                const results = data.analysis_results ? data.analysis_results[apIp] : null;
+
+                if (!results || !results.spectrum_data) {
+                    alert("No hay datos de espectro disponibles para este AP.");
+                    return;
+                }
+
+                initChart(results.spectrum_data);
+
+            } catch (error) {
+                console.error(error);
+                alert("Error cargando visualización: " + error.message);
+            }
+        });
+
+        function setMode(mode) {
+            currentMode = mode;
+
+            // Update UI buttons
+            document.getElementById('modePanBtn').classList.toggle('active', mode === 'pan');
+            document.getElementById('modeMarkerBtn').classList.toggle('active', mode === 'marker');
+            document.getElementById('modeEraserBtn').classList.toggle('active', mode === 'eraser');
+
+            // Update Help Text
+            const helpText = document.getElementById('helpText');
+            if (mode === 'pan') helpText.innerHTML = '<i class="bi bi-mouse"></i> Rueda: Zoom | Arrastrar: Pan';
+            if (mode === 'marker') helpText.innerHTML = '<i class="bi bi-geo-alt-fill"></i> Click: Agregar Marcador';
+            if (mode === 'eraser') helpText.innerHTML = '<i class="bi bi-eraser-fill"></i> Click cerca de un marcador para borrarlo';
+
+            // Update Chart config
+            if (chartInstance) {
+                chartInstance.options.plugins.zoom.pan.enabled = (mode === 'pan');
+                chartInstance.update();
+            }
+        }
+
+        function initChart(spectrumData) {
+            const ctx = document.getElementById('spectrumChart').getContext('2d');
+            const datasets = [];
+
+            // 1. AP Dataset
+            if (spectrumData.ap) {
+                datasets.push({
+                    label: `AP ${apIp}`,
+                    data: spectrumData.ap.map(p => ({ x: p.frequency, y: p.vertical })),
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    borderColor: 'rgba(54, 162, 235, 0.8)',
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    order: 99
+                });
+            }
+
+            // 2. SM Datasets
+            if (spectrumData.sms) {
+                let colorIdx = 0;
+                for (const [smIp, smPoints] of Object.entries(spectrumData.sms)) {
+                    const color = CHART_COLORS[colorIdx % CHART_COLORS.length];
+                    datasets.push({
+                        label: `SM ${smIp}`,
+                        data: smPoints.map(p => ({ x: p.frequency, y: p.vertical })),
+                        borderColor: color,
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        borderDash: [5, 5],
+                        tension: 0.1,
+                        order: 1
+                    });
+                    colorIdx++;
+                }
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    onClick: (e) => handleChartClick(e),
+                    plugins: {
+                        legend: {
+                            labels: { color: '#eee', font: { size: 11 } },
+                            position: 'top'
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(20, 20, 20, 0.9)',
+                            titleColor: '#fff',
+                            bodyColor: '#ddd',
+                            borderColor: '#555',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function (context) {
+                                    return `${context.dataset.label}: ${context.parsed.y.toFixed(1)} dBm`;
+                                }
+                            }
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                            },
+                            zoom: {
+                                wheel: { enabled: true },
+                                pinch: { enabled: true },
+                                mode: 'x',
+                            }
+                        },
+                        annotation: {
+                            annotations: {}
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Frecuencia (MHz)', color: '#aaa', font: { weight: 'bold' } },
+                            ticks: { color: '#aaa' },
+                            grid: { color: '#333' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Nivel Interferencia (dBm)', color: '#aaa', font: { weight: 'bold' } },
+                            ticks: { color: '#aaa' },
+                            grid: { color: '#333' },
+                            suggestedMin: -100,
+                            suggestedMax: -40
+                        }
+                    }
+                }
+            });
+        }
+
+        function handleChartClick(e) {
+            if (!chartInstance) return;
+
+            const canvasPosition = Chart.helpers.getRelativePosition(e, chartInstance);
+            const dataX = chartInstance.scales.x.getValueForPixel(canvasPosition.x);
+
+            if (currentMode === 'marker' && dataX) {
+                addMarker(dataX);
+            } else if (currentMode === 'eraser' && dataX) {
+                removeClosestMarker(dataX);
+            }
+        }
+
+        function addMarker(freq) {
+            const id = 'marker_' + Date.now();
+            markers[id] = freq;
+
+            const newAnnotation = {
+                type: 'line',
+                scaleID: 'x',
+                value: freq,
+                borderColor: '#FFC107',
+                borderWidth: 2,
+                label: {
+                    content: freq.toFixed(1) + ' MHz',
+                    display: true,
+                    position: 'start',
+                    backgroundColor: 'rgba(255, 193, 7, 0.8)',
+                    color: 'black',
+                    font: { size: 10 }
+                }
+            };
+
+            chartInstance.options.plugins.annotation.annotations[id] = newAnnotation;
+            chartInstance.update();
+        }
+
+        function removeClosestMarker(clickFreq) {
+            const threshold = 3.0; // MHz Tolerance
+            let closestId = null;
+            let minDiff = Infinity;
+
+            for (const [id, freq] of Object.entries(markers)) {
+                const diff = Math.abs(freq - clickFreq);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestId = id;
+                }
+            }
+
+            if (closestId && minDiff <= threshold) {
+                delete chartInstance.options.plugins.annotation.annotations[closestId];
+                delete markers[closestId];
+                chartInstance.update();
+            }
+        }
+
+        function clearMarkers() {
+            if (!chartInstance) return;
+            chartInstance.options.plugins.annotation.annotations = {};
+            markers = {};
+            chartInstance.update();
+        }
+
+        function resetZoom() {
+            if (chartInstance) chartInstance.resetZoom();
+        }
+    </script>
+</body>
+
+</html>
