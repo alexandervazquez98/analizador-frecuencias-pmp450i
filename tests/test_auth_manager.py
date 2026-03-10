@@ -2,7 +2,8 @@
 tests/test_auth_manager.py — Unit tests for AuthManager (SQLite-backed auth).
 
 Specification: change-003 specs § S3.3 — User Storage SQLite
-Design:        change-003 design § D3.1 — SQLite Schema + auth_manager.py
+              change-004 specs § S4.1 — Esquema de Base de Datos Unificada
+Design:        change-004 design § D4.1 — DatabaseManager + AuthManager refactor
 
 Tests:
   1. DB initialization: table creation, default admin user
@@ -10,6 +11,8 @@ Tests:
   3. Password change: hash update, must_change_password flag cleared
   4. User CRUD: create, delete, list, duplicate prevention
   5. Safety: cannot delete last user
+  6. Roles: create_user with role, update_role, role in authenticate/list (change-004)
+  7. reset_password: admin-initiated password reset (change-004)
 """
 
 import sqlite3
@@ -103,6 +106,14 @@ class TestAuthenticate:
         user = manager.get_user_by_id(1)
         assert user["last_login"] is not None
 
+    def test_authenticate_returns_role(self, auth_db):
+        """GIVEN valid credentials WHEN authenticate THEN result includes 'role' key."""
+        manager, _ = auth_db
+        user = manager.authenticate("admin", "admin")
+        assert user is not None
+        assert "role" in user
+        assert user["role"] == "admin"
+
 
 class TestChangePassword:
     """Tests for change_password() — hash update and flag clearing."""
@@ -128,6 +139,45 @@ class TestChangePassword:
         manager.change_password(1, "securepass")
         user = manager.get_user_by_id(1)
         assert check_password_hash(user["password_hash"], "securepass")
+
+
+class TestResetPassword:
+    """Tests for reset_password() — admin-initiated password reset (change-004)."""
+
+    def test_reset_password_sets_must_change(self, auth_db):
+        """GIVEN user with must_change=0 WHEN reset_password THEN must_change=1."""
+        manager, _ = auth_db
+        # First clear the flag
+        manager.change_password(1, "securepass")
+        user = manager.get_user_by_id(1)
+        assert user["must_change_password"] == 0
+
+        # Now reset
+        result = manager.reset_password(1)
+        assert result is True
+        user = manager.get_user_by_id(1)
+        assert user["must_change_password"] == 1
+
+    def test_reset_password_default_is_changeme(self, auth_db):
+        """GIVEN reset_password() without explicit pwd THEN password is 'changeme'."""
+        manager, _ = auth_db
+        manager.reset_password(1)
+        user = manager.authenticate("admin", "changeme")
+        assert user is not None
+
+    def test_reset_password_custom_password(self, auth_db):
+        """GIVEN reset_password(new_password='newpwd') THEN password is 'newpwd'."""
+        manager, _ = auth_db
+        manager.reset_password(1, new_password="resetme123")
+        user = manager.authenticate("admin", "resetme123")
+        assert user is not None
+        assert user["must_change_password"] == 1
+
+    def test_reset_password_nonexistent_user(self, auth_db):
+        """GIVEN non-existent user_id WHEN reset_password THEN returns False."""
+        manager, _ = auth_db
+        result = manager.reset_password(999)
+        assert result is False
 
 
 class TestGetUserById:
@@ -183,6 +233,33 @@ class TestCreateUser:
         manager, _ = auth_db
         with pytest.raises(sqlite3.IntegrityError):
             manager.create_user("admin", "anotherpass")
+
+    def test_create_user_default_role_is_operator(self, auth_db):
+        """GIVEN no role specified WHEN create_user THEN role is 'operator'."""
+        manager, _ = auth_db
+        uid = manager.create_user("opuser", "pass")
+        user = manager.get_user_by_id(uid)
+        assert user["role"] == "operator"
+
+    def test_create_user_with_admin_role(self, auth_db):
+        """GIVEN role='admin' WHEN create_user THEN role is 'admin'."""
+        manager, _ = auth_db
+        uid = manager.create_user("admin2", "pass", role="admin")
+        user = manager.get_user_by_id(uid)
+        assert user["role"] == "admin"
+
+    def test_create_user_with_operator_role(self, auth_db):
+        """GIVEN role='operator' WHEN create_user THEN role is 'operator'."""
+        manager, _ = auth_db
+        uid = manager.create_user("op2", "pass", role="operator")
+        user = manager.get_user_by_id(uid)
+        assert user["role"] == "operator"
+
+    def test_create_user_invalid_role_raises_value_error(self, auth_db):
+        """GIVEN invalid role WHEN create_user THEN raises ValueError."""
+        manager, _ = auth_db
+        with pytest.raises(ValueError, match="Invalid role"):
+            manager.create_user("baduser", "pass", role="superadmin")
 
 
 class TestDeleteUser:
@@ -247,3 +324,67 @@ class TestListUsers:
             assert "username" in u
             assert "must_change_password" in u
             assert "created_at" in u
+
+    def test_list_includes_role_field(self, auth_db):
+        """GIVEN users WHEN list_users THEN each has 'role' key (change-004)."""
+        manager, _ = auth_db
+        manager.create_user("op1", "pass", role="operator")
+        users = manager.list_users()
+        for u in users:
+            assert "role" in u
+        roles = {u["username"]: u["role"] for u in users}
+        assert roles["admin"] == "admin"
+        assert roles["op1"] == "operator"
+
+
+class TestUpdateRole:
+    """Tests for update_role() — role management (change-004)."""
+
+    def test_update_role_admin_to_operator(self, auth_db):
+        """GIVEN admin user WHEN update_role to operator THEN role is operator."""
+        manager, _ = auth_db
+        # Create a second admin so we can safely change admin's role
+        manager.create_user("admin2", "pass", role="admin")
+        result = manager.update_role(1, "operator")
+        assert result is True
+        user = manager.get_user_by_id(1)
+        assert user["role"] == "operator"
+
+    def test_update_role_operator_to_admin(self, auth_db):
+        """GIVEN operator user WHEN update_role to admin THEN role is admin."""
+        manager, _ = auth_db
+        uid = manager.create_user("opuser", "pass", role="operator")
+        result = manager.update_role(uid, "admin")
+        assert result is True
+        user = manager.get_user_by_id(uid)
+        assert user["role"] == "admin"
+
+    def test_update_role_invalid_role(self, auth_db):
+        """GIVEN valid user WHEN update_role('invalid') THEN raises ValueError."""
+        manager, _ = auth_db
+        with pytest.raises(ValueError, match="Invalid role"):
+            manager.update_role(1, "superuser")
+
+    def test_update_role_nonexistent_user(self, auth_db):
+        """GIVEN non-existent user WHEN update_role THEN returns False."""
+        manager, _ = auth_db
+        result = manager.update_role(999, "admin")
+        assert result is False
+
+    def test_update_role_reflected_in_authenticate(self, auth_db):
+        """GIVEN user with role changed WHEN authenticate THEN returned dict has new role."""
+        manager, _ = auth_db
+        uid = manager.create_user("testop", "pass", must_change=False, role="operator")
+        manager.update_role(uid, "admin")
+        user = manager.authenticate("testop", "pass")
+        assert user["role"] == "admin"
+
+
+class TestDefaultAdminRole:
+    """Tests for default admin user having role='admin' (change-004)."""
+
+    def test_default_admin_has_admin_role(self, auth_db):
+        """GIVEN fresh DB WHEN AuthManager creates default admin THEN role is 'admin'."""
+        manager, _ = auth_db
+        user = manager.get_user_by_id(1)
+        assert user["role"] == "admin"

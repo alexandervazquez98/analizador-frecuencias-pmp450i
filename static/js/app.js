@@ -23,6 +23,12 @@ let textRecommendationsModal = null;
 
 document.addEventListener('DOMContentLoaded', () => {
 
+    // Show Users tab only for admins
+    if (window.userRole === 'admin') {
+        const usersTabItem = document.getElementById('usersTabItem');
+        if (usersTabItem) usersTabItem.style.display = '';
+    }
+
     // Inicializar referencias DOM
     elements = {
         // Inputs
@@ -1033,4 +1039,726 @@ function resetSelect(sel) {
     sel.disabled = true;
     if (elements.confirmImportBtn) elements.confirmImportBtn.disabled = true;
     if (elements.smPreviewBox) elements.smPreviewBox.style.display = 'none';
+}
+
+// ==================== T42: PANEL DE TORRES ====================
+
+/**
+ * Fetches all towers from GET /api/towers.
+ * Returns array of tower objects.
+ */
+async function loadTowers() {
+    const response = await authFetch('/api/towers');
+    if (!response) return [];
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    // list_towers returns an array directly (not wrapped)
+    return Array.isArray(data) ? data : (data.towers || []);
+}
+
+/**
+ * Creates a new tower via POST /api/towers.
+ */
+async function createTower(data) {
+    const response = await authFetch('/api/towers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Updates a tower via PUT /api/towers/<id>.
+ */
+async function updateTower(towerId, data) {
+    const response = await authFetch(`/api/towers/${encodeURIComponent(towerId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Deletes a tower via DELETE /api/towers/<id>.
+ */
+async function deleteTower(towerId) {
+    const response = await authFetch(`/api/towers/${encodeURIComponent(towerId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Renders the towers panel — fetches and displays the table.
+ */
+async function renderTowersPanel() {
+    const container = document.getElementById('towersTableContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="text-center text-muted p-3"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Cargando...</div>`;
+
+    try {
+        const towers = await loadTowers();
+        if (towers.length === 0) {
+            container.innerHTML = `<div class="alert alert-secondary text-center"><i class="bi bi-building"></i> No hay torres registradas. Crea la primera con "Nueva Torre".</div>`;
+            return;
+        }
+
+        const isAdmin = window.userRole === 'admin';
+        const rows = towers.map(t => {
+            const createdAt = t.created_at ? new Date(t.created_at).toLocaleString() : 'N/A';
+            return `
+                <tr>
+                    <td class="font-monospace small">${escapeHtml(t.tower_id)}</td>
+                    <td>${escapeHtml(t.name)}</td>
+                    <td>${escapeHtml(t.location || '—')}</td>
+                    <td class="text-muted small">${createdAt}</td>
+                    <td>
+                        <button class="btn btn-outline-info btn-sm me-1"
+                            onclick="editTowerForm('${escapeAttr(t.tower_id)}','${escapeAttr(t.name)}','${escapeAttr(t.location||'')}','${escapeAttr(t.notes||'')}')">
+                            <i class="bi bi-pencil"></i> Editar
+                        </button>
+                        ${isAdmin ? `<button class="btn btn-outline-danger btn-sm"
+                            onclick="confirmDeleteTower('${escapeAttr(t.tower_id)}')">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-sm align-middle mb-0">
+                    <thead class="table-secondary text-dark">
+                        <tr>
+                            <th>Tower ID</th>
+                            <th>Nombre</th>
+                            <th>Ubicación</th>
+                            <th>Creada</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-muted small text-end">${towers.length} torre(s) registrada(s)</div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error cargando torres: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function showTowerForm(mode = 'create') {
+    const panel = document.getElementById('towerFormPanel');
+    const modeInput = document.getElementById('towerFormMode');
+    const idField = document.getElementById('towerFieldId');
+    const titleEl = document.getElementById('towerFormTitle');
+    if (!panel) return;
+    if (mode === 'create') {
+        if (modeInput) modeInput.value = 'create';
+        if (titleEl) titleEl.innerHTML = '<i class="bi bi-plus-circle"></i> Nueva Torre';
+        if (idField) { idField.value = ''; idField.disabled = false; }
+        document.getElementById('towerFieldName').value = '';
+        document.getElementById('towerFieldLocation').value = '';
+        document.getElementById('towerFieldNotes').value = '';
+        document.getElementById('towerFormEditId').value = '';
+    }
+    panel.style.display = '';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideTowerForm() {
+    const panel = document.getElementById('towerFormPanel');
+    if (panel) panel.style.display = 'none';
+}
+
+function editTowerForm(towerId, name, location, notes) {
+    showTowerForm('edit');
+    document.getElementById('towerFormMode').value = 'edit';
+    document.getElementById('towerFormTitle').innerHTML = '<i class="bi bi-pencil"></i> Editar Torre';
+    const idField = document.getElementById('towerFieldId');
+    if (idField) { idField.value = towerId; idField.disabled = true; }
+    document.getElementById('towerFormEditId').value = towerId;
+    document.getElementById('towerFieldName').value = name;
+    document.getElementById('towerFieldLocation').value = location;
+    document.getElementById('towerFieldNotes').value = notes;
+}
+
+async function submitTowerForm() {
+    const mode = document.getElementById('towerFormMode').value;
+    const name = document.getElementById('towerFieldName').value.trim();
+    const location = document.getElementById('towerFieldLocation').value.trim();
+    const notes = document.getElementById('towerFieldNotes').value.trim();
+
+    if (!name) { showPanelAlert('towersAlert', 'El campo Nombre es obligatorio.', 'warning'); return; }
+
+    let response;
+    if (mode === 'create') {
+        const towerId = document.getElementById('towerFieldId').value.trim();
+        if (!towerId) { showPanelAlert('towersAlert', 'El Tower ID es obligatorio.', 'warning'); return; }
+        response = await createTower({ tower_id: towerId, name, location: location || null, notes: notes || null });
+    } else {
+        const towerId = document.getElementById('towerFormEditId').value;
+        response = await updateTower(towerId, { name, location: location || null, notes: notes || null });
+    }
+
+    if (!response) return;
+
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('towersAlert', result.error || 'Error al guardar la torre.', 'danger');
+        return;
+    }
+
+    hideTowerForm();
+    showPanelAlert('towersAlert', mode === 'create' ? 'Torre creada correctamente.' : 'Torre actualizada correctamente.', 'success');
+    renderTowersPanel();
+}
+
+async function confirmDeleteTower(towerId) {
+    if (!confirm(`¿Eliminar la torre "${towerId}"? Esta acción no se puede deshacer.`)) return;
+    const response = await deleteTower(towerId);
+    if (!response) return;
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('towersAlert', result.error || 'Error al eliminar.', 'danger');
+        return;
+    }
+    showPanelAlert('towersAlert', `Torre "${towerId}" eliminada.`, 'success');
+    renderTowersPanel();
+}
+
+// ==================== T43: PANEL DE USUARIOS (admin only) ====================
+
+/**
+ * Fetches all users from GET /api/users.
+ */
+async function loadUsers() {
+    const response = await authFetch('/api/users');
+    if (!response) return [];
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    return Array.isArray(data) ? data : (data.users || []);
+}
+
+/**
+ * Creates a new user via POST /api/users.
+ */
+async function createUser(data) {
+    const response = await authFetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Updates user role via PUT /api/users/<id>.
+ */
+async function updateUserRole(userId, role) {
+    const response = await authFetch(`/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role })
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Resets user password via PUT /api/users/<id>/reset-password.
+ */
+async function resetUserPassword(userId) {
+    const response = await authFetch(`/api/users/${userId}/reset-password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_password: 'changeme' })
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Deletes a user via DELETE /api/users/<id>.
+ */
+async function deleteUser(userId) {
+    const response = await authFetch(`/api/users/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Renders the users panel. Hides if not admin.
+ */
+async function renderUsersPanel() {
+    const container = document.getElementById('usersTableContainer');
+    if (!container) return;
+
+    if (window.userRole !== 'admin') {
+        container.innerHTML = `<div class="alert alert-warning"><i class="bi bi-lock"></i> Acceso restringido a administradores.</div>`;
+        return;
+    }
+
+    container.innerHTML = `<div class="text-center text-muted p-3"><div class="spinner-border spinner-border-sm text-danger me-2"></div>Cargando...</div>`;
+
+    try {
+        const users = await loadUsers();
+
+        if (users.length === 0) {
+            container.innerHTML = `<div class="alert alert-secondary text-center"><i class="bi bi-people"></i> No hay usuarios registrados.</div>`;
+            return;
+        }
+
+        const rows = users.map(u => {
+            const lastLogin = u.last_login ? new Date(u.last_login).toLocaleString() : 'Nunca';
+            const roleBadge = u.role === 'admin'
+                ? '<span class="badge bg-danger">Admin</span>'
+                : '<span class="badge bg-secondary">Operador</span>';
+            const mustChangeBadge = u.must_change_password
+                ? '<span class="badge bg-warning text-dark">Cambio req.</span>'
+                : '';
+            return `
+                <tr>
+                    <td>${escapeHtml(u.username)}</td>
+                    <td>${roleBadge}</td>
+                    <td>${mustChangeBadge}</td>
+                    <td class="text-muted small">${lastLogin}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-info" title="Cambiar Rol"
+                                onclick="promptChangeRole(${u.id}, '${escapeAttr(u.username)}', '${escapeAttr(u.role)}')">
+                                <i class="bi bi-shield"></i> Rol
+                            </button>
+                            <button class="btn btn-outline-warning" title="Reset Password"
+                                onclick="confirmResetPassword(${u.id}, '${escapeAttr(u.username)}')">
+                                <i class="bi bi-key"></i>
+                            </button>
+                            <button class="btn btn-outline-danger" title="Eliminar"
+                                onclick="confirmDeleteUser(${u.id}, '${escapeAttr(u.username)}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-sm align-middle mb-0">
+                    <thead class="table-secondary text-dark">
+                        <tr>
+                            <th>Username</th>
+                            <th>Rol</th>
+                            <th>Estado</th>
+                            <th>Último Login</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-muted small text-end">${users.length} usuario(s)</div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function showUserForm() {
+    const panel = document.getElementById('userFormPanel');
+    if (!panel) return;
+    document.getElementById('userFieldUsername').value = '';
+    document.getElementById('userFieldPassword').value = '';
+    document.getElementById('userFieldRole').value = 'operator';
+    panel.style.display = '';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideUserForm() {
+    const panel = document.getElementById('userFormPanel');
+    if (panel) panel.style.display = 'none';
+}
+
+async function submitUserForm() {
+    const username = document.getElementById('userFieldUsername').value.trim();
+    const password = document.getElementById('userFieldPassword').value;
+    const role = document.getElementById('userFieldRole').value;
+
+    if (!username) { showPanelAlert('usersAlert', 'El username es obligatorio.', 'warning'); return; }
+    if (password.length < 6) { showPanelAlert('usersAlert', 'La contraseña debe tener al menos 6 caracteres.', 'warning'); return; }
+
+    const response = await createUser({ username, password, role, must_change_password: true });
+    if (!response) return;
+
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('usersAlert', result.error || 'Error al crear usuario.', 'danger');
+        return;
+    }
+
+    hideUserForm();
+    showPanelAlert('usersAlert', `Usuario "${username}" creado correctamente.`, 'success');
+    renderUsersPanel();
+}
+
+async function promptChangeRole(userId, username, currentRole) {
+    const newRole = currentRole === 'admin' ? 'operator' : 'admin';
+    const label = newRole === 'admin' ? 'Admin' : 'Operador';
+    if (!confirm(`Cambiar rol de "${username}" a "${label}"?`)) return;
+
+    const response = await updateUserRole(userId, newRole);
+    if (!response) return;
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('usersAlert', result.error || 'Error al cambiar rol.', 'danger');
+        return;
+    }
+    showPanelAlert('usersAlert', `Rol de "${username}" actualizado a "${label}".`, 'success');
+    renderUsersPanel();
+}
+
+async function confirmResetPassword(userId, username) {
+    if (!confirm(`Resetear la contraseña de "${username}" a "changeme"? El usuario deberá cambiarla al ingresar.`)) return;
+
+    const response = await resetUserPassword(userId);
+    if (!response) return;
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('usersAlert', result.error || 'Error al resetear contraseña.', 'danger');
+        return;
+    }
+    showPanelAlert('usersAlert', `Contraseña de "${username}" reseteada a "changeme".`, 'success');
+    renderUsersPanel();
+}
+
+async function confirmDeleteUser(userId, username) {
+    if (!confirm(`¿Eliminar al usuario "${username}"? Esta acción no se puede deshacer.`)) return;
+
+    const response = await deleteUser(userId);
+    if (!response) return;
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('usersAlert', result.error || 'Error al eliminar.', 'danger');
+        return;
+    }
+    showPanelAlert('usersAlert', `Usuario "${username}" eliminado.`, 'success');
+    renderUsersPanel();
+}
+
+// ==================== T44: HISTORIAL DE ESCANEOS + VERIFICACIÓN ====================
+
+// Track the currently selected scan for verification
+let _selectedScanId = null;
+
+/**
+ * Fetches scan history from GET /api/scans.
+ */
+async function loadScanHistory() {
+    const response = await authFetch('/api/scans');
+    if (!response) return [];
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    return data.scans || [];
+}
+
+/**
+ * Submits a config verification to POST /api/config-verifications.
+ */
+async function submitVerification(data) {
+    const response = await authFetch('/api/config-verifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!response) return null;
+    return response;
+}
+
+/**
+ * Fetches verifications for a specific scan.
+ */
+async function loadVerifications(scanId) {
+    const response = await authFetch(`/api/scans/${encodeURIComponent(scanId)}/verifications`);
+    if (!response) return [];
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.verifications || [];
+}
+
+/**
+ * Renders the history panel — fetches and displays scans table.
+ */
+async function renderHistoryPanel() {
+    const container = document.getElementById('historyTableContainer');
+    if (!container) return;
+
+    hideScanDetail();
+    container.innerHTML = `<div class="text-center text-muted p-3"><div class="spinner-border spinner-border-sm text-secondary me-2"></div>Cargando...</div>`;
+
+    try {
+        const scans = await loadScanHistory();
+
+        if (scans.length === 0) {
+            container.innerHTML = `<div class="alert alert-secondary text-center"><i class="bi bi-clock-history"></i> No hay escaneos en el historial.</div>`;
+            return;
+        }
+
+        const statusColors = {
+            'completed': 'success', 'scanning': 'primary', 'analyzing': 'info',
+            'failed': 'danger', 'started': 'warning'
+        };
+
+        const rows = scans.map(scan => {
+            const date = scan.created_at ? new Date(scan.created_at).toLocaleString() : 'N/A';
+            const badgeColor = statusColors[scan.status] || 'secondary';
+            const shortId = scan.scan_id ? scan.scan_id.substring(0, 12) + '...' : 'N/A';
+            const isCompleted = scan.status === 'completed';
+
+            return `
+                <tr class="${isCompleted ? 'scan-row-clickable' : 'opacity-75'}" style="${isCompleted ? 'cursor:pointer;' : ''}"
+                    ${isCompleted ? `onclick="openScanDetail('${escapeAttr(scan.scan_id)}')"` : ''}>
+                    <td class="font-monospace small" title="${escapeHtml(scan.scan_id || '')}">${escapeHtml(shortId)}</td>
+                    <td class="small">${date}</td>
+                    <td><span class="badge bg-${badgeColor}">${scan.status || 'unknown'}</span></td>
+                    <td class="text-center">${scan.ap_count || 0}</td>
+                    <td>
+                        ${isCompleted ? `<button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); openScanDetail('${escapeAttr(scan.scan_id)}')">
+                            <i class="bi bi-eye"></i> Ver
+                        </button>` : '<span class="text-muted small">—</span>'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-sm align-middle mb-0">
+                    <thead class="table-secondary text-dark">
+                        <tr>
+                            <th>Scan ID</th>
+                            <th>Fecha</th>
+                            <th>Estado</th>
+                            <th class="text-center">APs</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-muted small text-end">${scans.length} escaneo(s) registrado(s)</div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error cargando historial: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function openScanDetail(scanId) {
+    _selectedScanId = scanId;
+    const panel = document.getElementById('scanDetailPanel');
+    const idEl = document.getElementById('scanDetailId');
+    const contentEl = document.getElementById('scanDetailContent');
+    if (!panel || !idEl || !contentEl) return;
+
+    if (idEl) idEl.textContent = scanId.substring(0, 16) + '...';
+
+    // Pre-fill scan_id is implicit; clear form
+    document.getElementById('verifFieldApIp').value = '';
+    document.getElementById('verifFieldRecommendedFreq').value = '';
+    document.getElementById('verifFieldAppliedFreq').value = '';
+    document.getElementById('verifFieldChannelWidth').value = '';
+    document.getElementById('verifFieldTowerId').value = '';
+    document.getElementById('verifFieldNotes').value = '';
+
+    // Load scan details
+    contentEl.innerHTML = `<div class="spinner-border spinner-border-sm text-info me-2"></div> Cargando detalles...`;
+    panel.style.display = '';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    try {
+        const res = await authFetch(`/api/status/${encodeURIComponent(scanId)}`);
+        if (!res) return;
+        const status = await res.json();
+
+        const apCount = status.results ? (status.results.completed_aps || 0) : 0;
+        const smCount = status.results ? (status.results.completed_sms || 0) : 0;
+        const timestamp = status.results ? status.results.timestamp : null;
+        const dateStr = timestamp ? new Date(timestamp).toLocaleString() : 'N/A';
+
+        // Auto-fill recommended freq from best frequency if available
+        if (status.results && status.results.analysis_results) {
+            const firstAp = Object.values(status.results.analysis_results)[0];
+            if (firstAp && firstAp.best_frequency) {
+                const freq = firstAp.best_frequency['Frecuencia Central (MHz)'];
+                if (freq) document.getElementById('verifFieldRecommendedFreq').value = freq;
+            } else if (firstAp && firstAp.best_combined_frequency) {
+                const freq = firstAp.best_combined_frequency.frequency;
+                if (freq) document.getElementById('verifFieldRecommendedFreq').value = freq;
+            }
+            // Auto-fill first AP IP
+            const firstIp = Object.keys(status.results.analysis_results)[0];
+            if (firstIp) document.getElementById('verifFieldApIp').value = firstIp;
+        }
+
+        contentEl.innerHTML = `
+            <div class="row g-2">
+                <div class="col-auto">
+                    <span class="badge bg-secondary">Estado: ${escapeHtml(status.status || 'N/A')}</span>
+                </div>
+                <div class="col-auto">
+                    <span class="badge bg-info text-dark">APs: ${apCount}</span>
+                </div>
+                <div class="col-auto">
+                    <span class="badge bg-primary">SMs: ${smCount}</span>
+                </div>
+                <div class="col-auto">
+                    <span class="text-muted small">${dateStr}</span>
+                </div>
+            </div>
+        `;
+    } catch (err) {
+        contentEl.innerHTML = `<span class="text-danger">Error cargando detalles: ${escapeHtml(err.message)}</span>`;
+    }
+
+    // Load existing verifications for this scan
+    await refreshScanVerifications(scanId);
+}
+
+async function refreshScanVerifications(scanId) {
+    const container = document.getElementById('scanVerificationsContainer');
+    if (!container) return;
+
+    try {
+        const verifications = await loadVerifications(scanId);
+        if (verifications.length === 0) {
+            container.innerHTML = `<p class="text-muted small"><i class="bi bi-info-circle"></i> Sin verificaciones registradas para este escaneo.</p>`;
+            return;
+        }
+
+        const rows = verifications.map(v => `
+            <tr>
+                <td class="small">${escapeHtml(v.ap_ip || '—')}</td>
+                <td>${v.recommended_freq || '—'}</td>
+                <td>${v.applied_freq || '—'}</td>
+                <td>${v.channel_width || '—'}</td>
+                <td class="text-muted small">${v.notes ? escapeHtml(v.notes) : '—'}</td>
+                <td class="text-muted small">${v.created_at ? new Date(v.created_at).toLocaleString() : 'N/A'}</td>
+            </tr>
+        `).join('');
+
+        container.innerHTML = `
+            <h6 class="text-info mt-2"><i class="bi bi-list-check"></i> Verificaciones anteriores (${verifications.length})</h6>
+            <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-0">
+                    <thead><tr>
+                        <th>AP IP</th><th>Rec. (MHz)</th><th>Aplicada (MHz)</th>
+                        <th>Ancho</th><th>Notas</th><th>Fecha</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<p class="text-danger small">Error cargando verificaciones: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function hideScanDetail() {
+    const panel = document.getElementById('scanDetailPanel');
+    if (panel) panel.style.display = 'none';
+    _selectedScanId = null;
+}
+
+async function submitVerificationForm() {
+    if (!_selectedScanId) {
+        showPanelAlert('historyAlert', 'No hay escaneo seleccionado.', 'warning');
+        return;
+    }
+
+    const recommendedFreq = parseInt(document.getElementById('verifFieldRecommendedFreq').value);
+    if (!recommendedFreq || recommendedFreq <= 0) {
+        showPanelAlert('historyAlert', 'La Frecuencia Recomendada es obligatoria.', 'warning');
+        return;
+    }
+
+    const appliedFreqVal = document.getElementById('verifFieldAppliedFreq').value;
+    const channelWidthVal = document.getElementById('verifFieldChannelWidth').value;
+
+    const data = {
+        scan_id: _selectedScanId,
+        recommended_freq: recommendedFreq,
+        ap_ip: document.getElementById('verifFieldApIp').value.trim() || null,
+        applied_freq: appliedFreqVal ? parseInt(appliedFreqVal) : null,
+        channel_width: channelWidthVal ? parseInt(channelWidthVal) : null,
+        tower_id: document.getElementById('verifFieldTowerId').value.trim() || null,
+        notes: document.getElementById('verifFieldNotes').value.trim() || null
+    };
+
+    const response = await submitVerification(data);
+    if (!response) return;
+
+    const result = await response.json();
+    if (!response.ok) {
+        showPanelAlert('historyAlert', result.error || 'Error al registrar verificación.', 'danger');
+        return;
+    }
+
+    showPanelAlert('historyAlert', 'Verificación registrada correctamente.', 'success');
+    // Refresh the verifications list for this scan
+    await refreshScanVerifications(_selectedScanId);
+}
+
+// ==================== UTILITIES FOR PANELS ====================
+
+/**
+ * Shows an alert inside a panel's alert container.
+ */
+function showPanelAlert(containerId, message, type = 'info') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = `
+        <div class="alert alert-${type} alert-dismissible py-2 small" role="alert">
+            ${escapeHtml(message)}
+            <button type="button" class="btn-close btn-sm" onclick="this.parentElement.remove()"></button>
+        </div>
+    `;
+    container.style.display = '';
+    setTimeout(() => {
+        if (container.firstChild) container.firstChild.remove();
+    }, 5000);
+}
+
+/**
+ * Escapes HTML special characters to prevent XSS.
+ */
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+/**
+ * Escapes a string for safe use in HTML attribute values (single/double quotes in onclick etc).
+ */
+function escapeAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '&quot;');
 }

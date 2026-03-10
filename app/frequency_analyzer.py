@@ -716,7 +716,7 @@ class FrequencyAnalyzer:
         elif is_valid and snr >= 10:
             quality = "MARGINAL"
             warnings.append(
-                f"⚠️ SNR marginal ({snr:.1f} dB) - Enlace puede ser inestable"
+                f"SNR marginal ({snr:.1f} dB) - Enlace puede ser inestable"
             )
             warnings.append(f"Modulación limitada a {modulation}")
             if chain_imbalance > 3:
@@ -732,16 +732,16 @@ class FrequencyAnalyzer:
             # No válido o SNR < 10 dB
             quality = "CRÍTICO"
             if snr < 10:
-                warnings.append(f"🚨 SNR crítico ({snr:.1f} dB) - Enlace muy inestable")
+                warnings.append(f"SNR crítico ({snr:.1f} dB) - Enlace muy inestable")
                 warnings.append(f"Modulación: {modulation} - Rendimiento muy bajo")
             if chain_imbalance > 5:
                 warnings.append(
-                    f"🚨 Desequilibrio severo ({chain_imbalance:.1f} dB) - MIMO degradado"
+                    f"Desequilibrio severo ({chain_imbalance:.1f} dB) - MIMO degradado"
                 )
-                recommendations.append("🔧 URGENTE: Verificar y realinear antenas")
+                recommendations.append("URGENTE: Verificar y realinear antenas")
             if not is_valid:
                 warnings.append(
-                    "❌ Frecuencia no cumple criterios mínimos de operación"
+                    "Frecuencia no cumple criterios mínimos de operación"
                 )
 
             recommendations.append("🚨 ACCIÓN INMEDIATA REQUERIDA:")

@@ -36,7 +36,7 @@ COPY static/ ./static/
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
-# Create data directory for SQLite DB (auth, scan storage)
+# Create data directory for unified SQLite DB (analyzer.db — v3.0.0)
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
 USER appuser

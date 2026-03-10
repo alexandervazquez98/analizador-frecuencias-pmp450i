@@ -151,7 +151,7 @@ class TestInvalidTicket:
 
     def test_snmp_not_started_on_invalid_ticket(self, authenticated_client):
         """GIVEN invalid ticket WHEN POST /api/scan THEN SNMP scan NOT started."""
-        with patch("app.web_app.ScanTask") as mock_task:
+        with patch("app.routes.scan_routes.ScanTask") as mock_task:
             response = authenticated_client.post(
                 "/api/scan",
                 json={"ap_ips": ["192.168.1.1"], "ticket_id": -1},
