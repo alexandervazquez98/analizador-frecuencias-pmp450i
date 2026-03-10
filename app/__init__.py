@@ -4,9 +4,15 @@ Módulo de inicialización de la aplicación
 
 from flask import Flask
 from flask_cors import CORS
+from dotenv import load_dotenv
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+
+# Cargar .env ANTES de cualquier os.environ.get()
+# Busca .env en la raíz del proyecto (un nivel arriba de app/)
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_project_root, ".env"))
 
 
 def configure_logging():

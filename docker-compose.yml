@@ -10,14 +10,17 @@ services:
       - FLASK_APP=app.web_app
       - FLASK_ENV=production
       - FLASK_DEBUG=0
-      - DEFAULT_SNMP_COMMUNITY=Canopy
-      - DEFAULT_TARGET_RECEIVE_LEVEL=-52
-      - DEFAULT_MIN_SNR=32
-      - DEFAULT_MAX_POLARIZATION_DIFF=5
+      - SECRET_KEY=${SECRET_KEY}
+      # Parámetros de escaneo (leídos desde .env del host)
+      - SNMP_COMMUNITIES=${SNMP_COMMUNITIES}
+      - DEFAULT_TARGET_RX_LEVEL=${DEFAULT_TARGET_RX_LEVEL}
+      - DEFAULT_MIN_SNR=${DEFAULT_MIN_SNR}
+      - DEFAULT_MAX_POLARIZATION_DIFF=${DEFAULT_MAX_POLARIZATION_DIFF}
+      - DEFAULT_CHANNEL_WIDTH=${DEFAULT_CHANNEL_WIDTH}
+      # cnMaestro API
       - CNMAESTRO_URL=${CNMAESTRO_URL}
       - CNMAESTRO_ID=${CNMAESTRO_ID}
       - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
-      - SECRET_KEY=${SECRET_KEY}
     volumes:
       # Mapear código fuente para desarrollo
       - ./app:/app/app

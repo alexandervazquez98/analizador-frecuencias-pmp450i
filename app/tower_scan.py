@@ -5,6 +5,7 @@ Utiliza SNMP para orquestar escaneos de espectro simultáneos
 
 import asyncio
 import time
+import os
 from typing import List, Dict, Tuple
 from pysnmp.hlapi import *
 from pysnmp.proto.rfc1902 import Integer32
@@ -70,7 +71,12 @@ class TowerScanner:
                 c.strip() for c in snmp_communities.split(",") if c.strip()
             ]
         else:
-            self.snmp_communities = snmp_communities or ["Canopy"]
+            # Fallback: leer de .env → "Canopy" si no hay nada
+            if snmp_communities:
+                self.snmp_communities = snmp_communities
+            else:
+                raw = os.environ.get("SNMP_COMMUNITIES", "Canopy")
+                self.snmp_communities = [c.strip() for c in raw.split(",") if c.strip()]
 
         self.scan_results = {}
         self.log_callback = log_callback
@@ -682,7 +688,7 @@ def main():
 
     # Parsear argumentos
     ips = []
-    community = "Canopy"
+    community = os.environ.get("SNMP_COMMUNITIES", "Canopy").split(",")[0].strip()
 
     for arg in sys.argv[1:]:
         if "." in arg and arg.replace(".", "").isdigit():

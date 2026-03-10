@@ -95,9 +95,53 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configurar event listeners
     setupEventListeners();
 
-    // Cargar historial
+    // Cargar configuración desde .env (vía /api/config) y luego historial
+    loadConfigDefaults();
     loadRecentScans();
 });
+
+// ==================== CARGA DE CONFIGURACIÓN (.env) ====================
+
+async function loadConfigDefaults() {
+    /**
+     * Carga los defaults de configuración desde el servidor (/api/config)
+     * que a su vez los lee del archivo .env.
+     * Esto elimina todos los valores hardcodeados en el frontend.
+     */
+    try {
+        const response = await fetch('/api/config');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const config = await response.json();
+
+        // Poblar campos del formulario con los defaults del .env
+        if (elements.snmpCommunity && config.snmp_communities) {
+            elements.snmpCommunity.value = config.snmp_communities;
+        }
+
+        if (elements.targetRxLevel && config.target_rx_level !== undefined) {
+            elements.targetRxLevel.value = config.target_rx_level;
+        }
+
+        if (elements.channelWidth && config.channel_width !== undefined) {
+            elements.channelWidth.value = String(config.channel_width);
+        }
+
+        console.log('[Config] Defaults cargados desde .env:', config);
+    } catch (error) {
+        console.warn('[Config] No se pudo cargar /api/config, usando fallbacks:', error.message);
+        // Fallbacks de emergencia si el servidor no responde
+        if (elements.snmpCommunity && !elements.snmpCommunity.value) {
+            elements.snmpCommunity.value = 'Canopy';
+        }
+        if (elements.targetRxLevel && !elements.targetRxLevel.value) {
+            elements.targetRxLevel.value = '-52';
+        }
+        if (elements.channelWidth && !elements.channelWidth.value) {
+            elements.channelWidth.value = '20';
+        }
+    }
+}
 
 // ==================== EVENT LISTENERS ====================
 
@@ -178,7 +222,7 @@ async function startScan() {
     const scanData = {
         ap_ips: apIPs,
         sm_ips: smIPs,
-        snmp_community: elements.snmpCommunity.value || 'MEXI2-BB-RW',
+        snmp_community: elements.snmpCommunity.value || '',
         config: {
             target_rx_level: parseFloat(elements.targetRxLevel.value),
             channel_width: channelWidth

@@ -35,6 +35,33 @@ logger = logging.getLogger(__name__)
 # Crear aplicación Flask
 app = create_app()
 
+
+# ==================== CONFIGURACIÓN CENTRALIZADA (.env) ====================
+
+
+def get_scan_defaults() -> dict:
+    """
+    Lee los defaults de escaneo desde variables de entorno (.env).
+    Fuente única de verdad para toda la configuración de la app.
+
+    Returns:
+        dict con claves: snmp_communities, target_rx_level, min_snr,
+        max_polarization_diff, channel_width
+    """
+    raw_communities = os.environ.get("SNMP_COMMUNITIES", "Canopy")
+    communities = [c.strip() for c in raw_communities.split(",") if c.strip()]
+
+    return {
+        "snmp_communities": communities,
+        "target_rx_level": int(os.environ.get("DEFAULT_TARGET_RX_LEVEL", "-52")),
+        "min_snr": int(os.environ.get("DEFAULT_MIN_SNR", "32")),
+        "max_polarization_diff": int(
+            os.environ.get("DEFAULT_MAX_POLARIZATION_DIFF", "5")
+        ),
+        "channel_width": int(os.environ.get("DEFAULT_CHANNEL_WIDTH", "20")),
+    }
+
+
 # Archivo de almacenamiento persistente
 STORAGE_FILE = Path("/tmp/tower_scan_storage.json")
 
@@ -850,6 +877,34 @@ def send_static(path):
     return send_from_directory("../static", path)
 
 
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    """
+    Devuelve los defaults de configuración cargados desde .env.
+    El frontend llama a este endpoint al iniciar para poblar el formulario.
+
+    Returns:
+        {
+            "snmp_communities": "MEXI2-BB-RW,MEXI2-BB-RO,...",
+            "target_rx_level": -52,
+            "min_snr": 32,
+            "max_polarization_diff": 5,
+            "channel_width": 20
+        }
+    """
+    defaults = get_scan_defaults()
+    return jsonify(
+        {
+            # String separado por comas para el input del formulario
+            "snmp_communities": ", ".join(defaults["snmp_communities"]),
+            "target_rx_level": defaults["target_rx_level"],
+            "min_snr": defaults["min_snr"],
+            "max_polarization_diff": defaults["max_polarization_diff"],
+            "channel_width": defaults["channel_width"],
+        }
+    )
+
+
 # ==================== API REST ====================
 
 
@@ -866,12 +921,13 @@ def start_scan(audit_manager=None):
     Body JSON:
     {
         "ap_ips": ["192.168.1.1", "192.168.1.2"],
-        "sm_ips": ["192.168.1.100", "192.168.1.101"],  // OPCIONAL para análisis cruzado
-        "snmp_community": "Canopy",
-        "config": {
+        "sm_ips": ["192.168.1.100", "192.168.1.101"],  // OPCIONAL
+        "snmp_community": "COM1,COM2,...",              // OPCIONAL (usa .env si vacío)
+        "config": {                                     // OPCIONAL (usa .env si vacío)
             "target_rx_level": -52,
             "min_snr": 32,
-            "max_pol_diff": 5
+            "max_pol_diff": 5,
+            "channel_width": 20
         }
     }
 
@@ -884,8 +940,10 @@ def start_scan(audit_manager=None):
     """
     try:
         data = request.get_json()
+        defaults = get_scan_defaults()
 
-        snmp_communities_input = data.get("snmp_community", "MEXI2-BB-RW")
+        # --- Comunidades SNMP ---
+        snmp_communities_input = data.get("snmp_community", "")
 
         # Validar datos requeridos
         ap_ips = data.get("ap_ips", [])
@@ -901,22 +959,22 @@ def start_scan(audit_manager=None):
         if not ap_ips:
             return jsonify({"error": "Se requiere al menos una IP de AP"}), 400
 
-        # Procesar comunidades (string o lista)
-        if isinstance(snmp_communities_input, str):
+        # Procesar comunidades: request → .env → fallback "Canopy"
+        if isinstance(snmp_communities_input, str) and snmp_communities_input.strip():
             snmp_communities = [
                 c.strip() for c in snmp_communities_input.split(",") if c.strip()
             ]
-        elif isinstance(snmp_communities_input, list):
+        elif isinstance(snmp_communities_input, list) and snmp_communities_input:
             snmp_communities = snmp_communities_input
         else:
-            snmp_communities = ["MEXI2-BB-RW"]
+            snmp_communities = defaults["snmp_communities"]
 
-        # Configuración opcional
+        # Configuración: request → .env → hardcoded fallback
         config = data.get("config", {})
-        config.setdefault("target_rx_level", -52)
-        config.setdefault("min_snr", 32)
-        config.setdefault("max_pol_diff", 5)
-        config.setdefault("channel_width", 20)  # Default 20MHz
+        config.setdefault("target_rx_level", defaults["target_rx_level"])
+        config.setdefault("min_snr", defaults["min_snr"])
+        config.setdefault("max_pol_diff", defaults["max_polarization_diff"])
+        config.setdefault("channel_width", defaults["channel_width"])
 
         # Crear tarea de escaneo con SMs opcionales
         scan_id = str(uuid.uuid4())

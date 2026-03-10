@@ -35,9 +35,9 @@
                         <div class="mb-3">
                             <label class="form-label text-light small">Comunidad SNMP</label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                id="snmpCommunity" value="MEXI2-BB-RW, MEXI2-BB-RO, MEXI2BBRW, MEXI2BBRO">
-                            <div class="form-text text-muted" style="font-size: 0.7em;">Puede incluir múltiples
-                                separadas por coma</div>
+                                id="snmpCommunity" placeholder="Cargando desde servidor...">
+                            <div class="form-text text-muted" style="font-size: 0.7em;">Puede incluir m&uacute;ltiples
+                                separadas por coma (se cargan desde .env)</div>
                         </div>
 
                         <!-- Basic Params -->
@@ -46,7 +46,7 @@
                                 <label class="form-label text-light small">Target Rx (dBm)</label>
                                 <input type="number"
                                     class="form-control form-control-sm bg-dark text-light border-secondary"
-                                    id="targetRxLevel" value="-52">
+                                    id="targetRxLevel" placeholder="...">
                             </div>
                             <div class="col-6">
                                 <label class="form-label text-light small">Ancho Canal</label>
@@ -55,7 +55,7 @@
                                     <option value="5">5 MHz</option>
                                     <option value="10">10 MHz</option>
                                     <option value="15">15 MHz</option>
-                                    <option value="20" selected>20 MHz</option>
+                                    <option value="20">20 MHz</option>
                                     <option value="30">30 MHz</option>
                                     <option value="40">40 MHz</option>
                                 </select>
