@@ -3,13 +3,23 @@ Aplicación web Flask para Tower Scan Automation
 Proporciona API REST e interfaz web para gestionar escaneos
 """
 
-from flask import render_template, request, jsonify, send_from_directory
+from flask import (
+    render_template,
+    request,
+    jsonify,
+    send_from_directory,
+    session,
+    redirect,
+    url_for,
+)
 from app import create_app
 from app.tower_scan import TowerScanner
 from app.frequency_analyzer import FrequencyAnalyzer, analyze_ap
 from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData
 from app.audit_manager import AuditManager, AuditLogException
+from app.auth_manager import AuthManager
 from app.cnmaestro_client import CnMaestroClient
+from werkzeug.security import check_password_hash
 from functools import wraps
 import asyncio
 import threading
@@ -34,6 +44,44 @@ logger = logging.getLogger(__name__)
 
 # Crear aplicación Flask
 app = create_app()
+
+# Instantiate AuthManager (SQLite-backed user authentication)
+auth_manager = AuthManager(db_path=os.environ.get("AUTH_DB_PATH", "data/auth.db"))
+
+
+# ==================== DECORADOR DE AUTENTICACIÓN ====================
+
+
+def login_required(f):
+    """Decorator: redirects to /login if no valid session.
+    For API routes (Accept: application/json or XHR), returns 401 JSON.
+    For routes: if must_change_password, redirects to /change-password.
+    """
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("user"):
+            if (
+                request.is_json
+                or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            ):
+                return jsonify({"error": "No autenticado", "redirect": "/login"}), 401
+            return redirect(url_for("login"))
+        if session.get("must_change_password"):
+            if request.is_json:
+                return (
+                    jsonify(
+                        {
+                            "error": "Debe cambiar su contraseña",
+                            "redirect": "/change-password",
+                        }
+                    ),
+                    403,
+                )
+            return redirect(url_for("change_password"))
+        return f(*args, **kwargs)
+
+    return decorated
 
 
 # ==================== CONFIGURACIÓN CENTRALIZADA (.env) ====================
@@ -127,9 +175,9 @@ scan_results: Dict[str, Dict] = {}
 def requires_audit_ticket(f):
     """Decorador que intercepta peticiones para validar credenciales de auditoría.
 
-    Busca X-Audit-User y X-Ticket-ID en headers (prioridad) o en el body JSON.
-    Si la validación falla, retorna HTTP 403 y bloquea el escaneo SNMP.
-    Si pasa, inyecta 'audit_manager' como kwarg del endpoint.
+    Modified for change-003: gets user from session['user'] (primary) with
+    fallback to X-Audit-User header for backward-compatible API clients.
+    Only ticket_id needs to come from the request (body or header).
 
     Especificación: 02_specs.md § S2 — Contrato de Auditoría
     Diseño:       03_design.md § D2 — Intercepción de Peticiones
@@ -137,16 +185,18 @@ def requires_audit_ticket(f):
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # 1. Extraer credenciales (Headers tienen prioridad, luego JSON body)
-        user = request.headers.get("X-Audit-User")
-        ticket_id = request.headers.get("X-Ticket-ID")
+        # 1. Get user from session (primary) or header (backward compat)
+        user = session.get("user")
+        if not user:
+            user = request.headers.get("X-Audit-User")
 
+        # 2. Get ticket_id from body (primary) or header
+        ticket_id = None
         if request.is_json:
             data = request.get_json(silent=True) or {}
-            if not user:
-                user = data.get("user")
-            if not ticket_id:
-                ticket_id = data.get("ticket_id")
+            ticket_id = data.get("ticket_id")
+        if not ticket_id:
+            ticket_id = request.headers.get("X-Ticket-ID")
 
         # 2. Instanciar AuditManager (lanza AuditLogException si es inválido)
         try:
@@ -865,7 +915,89 @@ def parse_ip_list(ip_text: str) -> List[str]:
 # ==================== RUTAS WEB ====================
 
 
+# ---- Authentication Routes (unprotected) ----
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Login page and handler."""
+    if request.method == "GET":
+        if session.get("user"):
+            return redirect(url_for("index"))
+        return render_template("login.html")
+
+    # POST
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    user = auth_manager.authenticate(username, password)
+
+    if not user:
+        return render_template("login.html", error="Usuario o contraseña incorrectos")
+
+    session["user"] = user["username"]
+    session["user_id"] = user["id"]
+    session["must_change_password"] = bool(user["must_change_password"])
+
+    if user["must_change_password"]:
+        return redirect(url_for("change_password"))
+
+    return redirect(url_for("index"))
+
+
+@app.route("/logout")
+def logout():
+    """Clear session and redirect to login."""
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+def change_password():
+    """Force password change on first login or voluntary change."""
+    if not session.get("user"):
+        return redirect(url_for("login"))
+
+    if request.method == "GET":
+        return render_template("change_password.html")
+
+    current = request.form.get("current_password", "")
+    new_pwd = request.form.get("new_password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    # Validation
+    user = auth_manager.get_user_by_id(session["user_id"])
+    if not user:
+        session.clear()
+        return redirect(url_for("login"))
+
+    if not check_password_hash(user["password_hash"], current):
+        return render_template(
+            "change_password.html", error="Contraseña actual incorrecta"
+        )
+    if new_pwd != confirm:
+        return render_template(
+            "change_password.html", error="Las contraseñas no coinciden"
+        )
+    if len(new_pwd) < 6:
+        return render_template(
+            "change_password.html",
+            error="La contraseña debe tener al menos 6 caracteres",
+        )
+    if current == new_pwd:
+        return render_template(
+            "change_password.html", error="La nueva contraseña debe ser diferente"
+        )
+
+    auth_manager.change_password(session["user_id"], new_pwd)
+    session["must_change_password"] = False
+    return redirect(url_for("index"))
+
+
+# ---- Protected Routes ----
+
+
 @app.route("/")
+@login_required
 def index():
     """Página principal"""
     return render_template("index.html")
@@ -878,6 +1010,7 @@ def send_static(path):
 
 
 @app.route("/api/config", methods=["GET"])
+@login_required
 def get_config():
     """
     Devuelve los defaults de configuración cargados desde .env.
@@ -909,6 +1042,7 @@ def get_config():
 
 
 @app.route("/api/scan", methods=["POST"])
+@login_required
 @requires_audit_ticket
 def start_scan(audit_manager=None):
     """
@@ -1040,6 +1174,7 @@ def start_scan(audit_manager=None):
 
 
 @app.route("/api/status/<scan_id>", methods=["GET"])
+@login_required
 def get_scan_status(scan_id: str):
     """
     Obtener estado de un escaneo
@@ -1112,6 +1247,7 @@ cnmaestro_client = CnMaestroClient(CNMAESTO_URL, CNMAESTRO_ID, CNMAESTRO_SECRET)
 
 
 @app.route("/api/cnmaestro/inventory", methods=["GET"])
+@login_required
 def get_cnmaestro_inventory():
     """Get processed inventory from cnMaestro"""
     try:
@@ -1123,6 +1259,7 @@ def get_cnmaestro_inventory():
 
 
 @app.route("/api/results/<scan_id>", methods=["GET"])
+@login_required
 def get_scan_results(scan_id: str):
     """
     Obtener resultados completos de un escaneo
@@ -1164,6 +1301,7 @@ def get_scan_results(scan_id: str):
 
 
 @app.route("/spectrum/<scan_id>/<ap_ip>")
+@login_required
 def spectrum_viewer(scan_id, ap_ip):
     """
     Renderizar visor de espectro en página independiente
@@ -1172,6 +1310,7 @@ def spectrum_viewer(scan_id, ap_ip):
 
 
 @app.route("/api/recommendations", methods=["GET"])
+@login_required
 def get_recommendations():
     """
     Obtener recomendaciones de configuración
@@ -1188,12 +1327,14 @@ def get_recommendations():
 
 
 @app.route("/spectrum_view/<ip>")
+@login_required
 def spectrum_view(ip):
     """Render spectrum view page for specific IP"""
     return render_template("spectrum_viewer.html", ip=ip)
 
 
 @app.route("/api/spectrum_data/<ip>")
+@login_required
 def get_spectrum_data_api(ip):
     """Get spectrum data for specific IP"""
 
@@ -1241,6 +1382,7 @@ def get_spectrum_data_api(ip):
 
 @app.route("/api/scans", methods=["GET"])
 @app.route("/api/scans/recent", methods=["GET"])
+@login_required
 def list_scans():
     """
     Listar todos los escaneos

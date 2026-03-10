@@ -41,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
         globalSpectrumBtn: document.getElementById('globalSpectrumBtn'),
         newScanBtn: document.getElementById('newScanBtn'),
 
+        // Auth / Audit
+        ticketId: document.getElementById('ticketId'),
+
         // Dashboard
         welcomeMessage: document.getElementById('welcomeMessage'),
         spectrumChartCanvas: document.getElementById('spectrumChart'),
@@ -109,7 +112,8 @@ async function loadConfigDefaults() {
      * Esto elimina todos los valores hardcodeados en el frontend.
      */
     try {
-        const response = await fetch('/api/config');
+        const response = await authFetch('/api/config');
+        if (!response) return; // Redirected to login
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const config = await response.json();
@@ -151,6 +155,16 @@ function setupEventListeners() {
     if (elements.exportResultsBtn) elements.exportResultsBtn.addEventListener('click', exportResults);
     if (elements.globalSpectrumBtn) elements.globalSpectrumBtn.addEventListener('click', openGlobalSpectrumViewer);
     if (elements.newScanBtn) elements.newScanBtn.addEventListener('click', resetInterface);
+
+    // Ticket ID: enable/disable scan button based on valid ticket
+    if (elements.ticketId) {
+        elements.ticketId.addEventListener('input', () => {
+            const val = parseInt(elements.ticketId.value);
+            if (elements.startScanBtn) {
+                elements.startScanBtn.disabled = !val || val <= 0;
+            }
+        });
+    }
 
     // File Uploads
     setupFileUpload(elements.apFileUpload, elements.apIPs, 'APs');
@@ -209,6 +223,18 @@ function setupFileUpload(fileInput, targetTextarea, type) {
 
 // ==================== LÓGICA PRINCIPAL ====================
 
+/**
+ * Wrapper for fetch that handles 401 (unauthorized) by redirecting to /login.
+ */
+async function authFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return null;
+    }
+    return response;
+}
+
 async function startScan() {
     const apIPs = parseIPList(elements.apIPs.value);
     const smIPs = parseIPList(elements.smIPs.value);
@@ -218,10 +244,18 @@ async function startScan() {
         return;
     }
 
+    // Validate ticket_id
+    const ticketId = elements.ticketId ? parseInt(elements.ticketId.value) : null;
+    if (!ticketId || ticketId <= 0) {
+        alert('Debe ingresar un Ticket ID valido (numero entero positivo).');
+        return;
+    }
+
     const channelWidth = parseInt(elements.channelWidth.value);
     const scanData = {
         ap_ips: apIPs,
         sm_ips: smIPs,
+        ticket_id: ticketId,
         snmp_community: elements.snmpCommunity.value || '',
         config: {
             target_rx_level: parseFloat(elements.targetRxLevel.value),
@@ -242,12 +276,13 @@ async function startScan() {
     addLogEntry(`Iniciando escaneo (Ancho: ${channelWidth} MHz)`, 'info');
 
     try {
-        const response = await fetch('/api/scan', {
+        const response = await authFetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(scanData)
         });
 
+        if (!response) return; // Redirected to login
         if (!response.ok) throw new Error((await response.json()).error || 'Error al iniciar');
 
         const result = await response.json();
@@ -279,7 +314,8 @@ async function checkStatus() {
     if (!appState.currentScanId) return;
 
     try {
-        const res = await fetch(`/api/status/${appState.currentScanId}`);
+        const res = await authFetch(`/api/status/${appState.currentScanId}`);
+        if (!res) return; // Redirected to login
         const status = await res.json();
 
         updateProgress(status.progress);
@@ -734,6 +770,8 @@ function resetInterface() {
 function clearForm() {
     elements.apIPs.value = '';
     elements.smIPs.value = '';
+    if (elements.ticketId) elements.ticketId.value = '';
+    if (elements.startScanBtn) elements.startScanBtn.disabled = true;
     elements.logOutput.innerHTML = '';
 }
 
@@ -764,7 +802,8 @@ async function loadRecentScans() {
     if (!elements.recentScans) return;
 
     try {
-        const response = await fetch('/api/scans');
+        const response = await authFetch('/api/scans');
+        if (!response) return; // Redirected to login
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
@@ -811,7 +850,8 @@ async function loadRecentScans() {
                 if (!scanId) return;
 
                 try {
-                    const res = await fetch(`/api/status/${scanId}`);
+                    const res = await authFetch(`/api/status/${scanId}`);
+                    if (!res) return; // Redirected to login
                     const status = await res.json();
 
                     if (status.status === 'completed' && status.results) {
@@ -856,7 +896,8 @@ async function openImportModal() {
     if (elements.stepSelection) elements.stepSelection.style.display = 'none';
 
     try {
-        const response = await fetch('/api/cnmaestro/inventory');
+        const response = await authFetch('/api/cnmaestro/inventory');
+        if (!response) return; // Redirected to login
         const data = await response.json();
 
         if (data.error) {

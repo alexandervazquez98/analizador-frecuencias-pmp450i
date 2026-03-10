@@ -32,21 +32,34 @@ def storage_file(tmp_path):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch, storage_file):
-    """Flask test client with STORAGE_FILE and audit log redirected to tmp."""
+    """Flask test client with STORAGE_FILE, auth DB, and audit log redirected to tmp.
+    Authenticated as admin (must_change cleared) so protected routes work.
+    """
     from pathlib import Path
 
     log_file = str(tmp_path / "audit_logs.jsonl")
     monkeypatch.setattr(AuditManager, "LOG_FILE", log_file)
 
+    # Set up auth DB in temp directory
+    db_path = str(tmp_path / "test_auth.db")
+    monkeypatch.setenv("AUTH_DB_PATH", db_path)
+
     import app.web_app as web_app_mod
 
     monkeypatch.setattr(web_app_mod, "STORAGE_FILE", Path(str(storage_file)))
+
+    # Re-initialize auth_manager with temp DB
+    web_app_mod.auth_manager.__init__(db_path=db_path)
+    # Clear must_change_password for admin
+    web_app_mod.auth_manager.change_password(1, "admin")
 
     # Clear in-memory scans between tests
     web_app_mod.active_scans.clear()
 
     web_app_mod.app.config["TESTING"] = True
     with web_app_mod.app.test_client() as c:
+        # Login as admin
+        c.post("/login", data={"username": "admin", "password": "admin"})
         yield c
 
 

@@ -53,6 +53,9 @@ docker-compose.override.yml
 # Audit logs (contain sensitive data)
 audit_logs.jsonl
 
+# Persistent data directory (SQLite auth DB — created at runtime)
+data/
+
 # Cache
 .pytest_cache/
 .ruff_cache/

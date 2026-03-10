@@ -23,12 +23,16 @@ services:
       - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
       # Almacenamiento persistente
       - STORAGE_FILE_PATH=${STORAGE_FILE_PATH:-/app/data/tower_scan_storage.json}
+      # Authentication DB
+      - AUTH_DB_PATH=${AUTH_DB_PATH:-/app/data/auth.db}
     volumes:
       # Mapear código fuente para desarrollo
       - ./app:/app/app
       - ./static:/app/static
       # Mapear carpeta de logs
       - ./logs:/app/logs
+      # Persistent data (SQLite auth DB, scan storage)
+      - ./data:/app/data
     restart: unless-stopped
     networks:
       - tower-scan-network

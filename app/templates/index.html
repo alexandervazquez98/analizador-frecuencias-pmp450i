@@ -13,11 +13,17 @@
 <body>
     <div class="container-fluid p-4 d-flex flex-column vh-100" style="overflow: hidden;">
         <!-- Header -->
-        <header class="header mb-4 text-center">
+        <header class="header mb-4 text-center position-relative">
             <div class="logo">
                 <h1 class="display-5 fw-bold"><i class="bi bi-broadcast-pin text-primary"></i> Tower Scan Automation
                 </h1>
                 <p class="lead text-muted">Cambium PMP 450i - Analizador de Frecuencias & Optimización Uplink</p>
+            </div>
+            <div class="position-absolute top-0 end-0 p-3">
+                <span class="text-light me-2"><i class="bi bi-person-circle"></i> {{ session['user'] }}</span>
+                <a href="/logout" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-box-arrow-right"></i> Salir
+                </a>
             </div>
         </header>
 
@@ -153,10 +159,22 @@
                         </div>
                     </div>
                     <div class="card-footer bg-transparent border-0 text-end">
-                        <button id="clearBtn" class="btn btn-outline-secondary btn-sm me-2">Limpiar</button>
-                        <button id="startScanBtn" class="btn btn-primary btn-sm px-4 fw-bold">
-                            <i class="bi bi-play-circle-fill"></i> Iniciar Análisis
-                        </button>
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="form-label text-light small mb-0">Ticket ID:</label>
+                                <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                    id="ticketId" placeholder="# ticket" min="1" style="width: 120px;">
+                            </div>
+                            <div>
+                                <button id="clearBtn" class="btn btn-outline-secondary btn-sm me-2">Limpiar</button>
+                                <button id="startScanBtn" class="btn btn-primary btn-sm px-4 fw-bold" disabled>
+                                    <i class="bi bi-play-circle-fill"></i> Iniciar Analisis
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-text text-muted text-start" style="font-size: 0.65em;">
+                            Requerido para auditoria - identifica la orden de trabajo
+                        </div>
                     </div>
                 </div>
 
