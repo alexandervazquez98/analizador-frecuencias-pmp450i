@@ -760,8 +760,76 @@ function readTextFile(file) {
 
 // Simulador de Progreso ELIMINADO - Ahora usamos logs reales del backend
 
-function loadRecentScans() {
-    // Implementar si se agrega backend de historial
+async function loadRecentScans() {
+    if (!elements.recentScans) return;
+
+    try {
+        const response = await fetch('/api/scans');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        const scans = data.scans || [];
+
+        if (scans.length === 0) {
+            elements.recentScans.innerHTML = '<div class="text-center text-muted p-2">Sin escaneos recientes</div>';
+            return;
+        }
+
+        elements.recentScans.innerHTML = scans.map(scan => {
+            const date = scan.created_at ? new Date(scan.created_at).toLocaleString() : 'N/A';
+            const statusColors = {
+                'completed': 'success',
+                'scanning': 'primary',
+                'analyzing': 'info',
+                'failed': 'danger',
+                'started': 'warning'
+            };
+            const badgeColor = statusColors[scan.status] || 'secondary';
+            const statusLabel = scan.status || 'unknown';
+            const isClickable = scan.status === 'completed';
+
+            return `
+                <a href="#" class="list-group-item list-group-item-action bg-dark text-light border-secondary py-1 px-2 ${isClickable ? 'recent-scan-entry' : ''}"
+                   data-scan-id="${scan.scan_id}" ${!isClickable ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-truncate me-2" style="max-width: 140px;" title="${scan.scan_id}">${scan.scan_id.substring(0, 8)}...</small>
+                        <span class="badge bg-${badgeColor}" style="font-size:0.65rem;">${statusLabel}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <small class="text-muted" style="font-size:0.65rem;">${date}</small>
+                        <small class="text-muted" style="font-size:0.65rem;">${scan.ap_count || 0} APs</small>
+                    </div>
+                </a>
+            `;
+        }).join('');
+
+        // Add click handlers to load completed scan results
+        elements.recentScans.querySelectorAll('.recent-scan-entry').forEach(entry => {
+            entry.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const scanId = entry.getAttribute('data-scan-id');
+                if (!scanId) return;
+
+                try {
+                    const res = await fetch(`/api/status/${scanId}`);
+                    const status = await res.json();
+
+                    if (status.status === 'completed' && status.results) {
+                        appState.currentScanId = scanId;
+                        if (elements.welcomePanel) elements.welcomePanel.style.display = 'none';
+                        if (elements.statusPanel) elements.statusPanel.style.display = 'none';
+                        displayResults(status.results);
+                    }
+                } catch (err) {
+                    console.error('Error loading scan:', err);
+                }
+            });
+        });
+
+    } catch (error) {
+        console.warn('[RecentScans] No se pudo cargar historial:', error.message);
+        elements.recentScans.innerHTML = '<div class="text-center text-muted p-2">Error cargando historial</div>';
+    }
 }
 
 function exportResults() {

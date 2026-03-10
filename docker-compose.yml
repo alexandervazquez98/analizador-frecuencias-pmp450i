@@ -21,6 +21,8 @@ services:
       - CNMAESTRO_URL=${CNMAESTRO_URL}
       - CNMAESTRO_ID=${CNMAESTRO_ID}
       - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
+      # Almacenamiento persistente
+      - STORAGE_FILE_PATH=${STORAGE_FILE_PATH:-/app/data/tower_scan_storage.json}
     volumes:
       # Mapear código fuente para desarrollo
       - ./app:/app/app

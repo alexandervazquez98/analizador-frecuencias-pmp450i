@@ -62,8 +62,8 @@ def get_scan_defaults() -> dict:
     }
 
 
-# Archivo de almacenamiento persistente
-STORAGE_FILE = Path("/tmp/tower_scan_storage.json")
+# Archivo de almacenamiento persistente (configurable vía env)
+STORAGE_FILE = Path(os.environ.get("STORAGE_FILE_PATH", "/tmp/tower_scan_storage.json"))
 
 
 def load_storage():
@@ -1127,21 +1127,40 @@ def get_scan_results(scan_id: str):
     """
     Obtener resultados completos de un escaneo
     """
-    if scan_id not in active_scans:
+    # 1. Intentar desde memoria
+    if scan_id in active_scans:
+        task = active_scans[scan_id]["task"]
+
+        if task.status != "completed":
+            return jsonify(
+                {
+                    "error": "Scan aún no completado",
+                    "status": task.status,
+                    "progress": task.progress,
+                }
+            ), 400
+
+        return jsonify(task.results)
+
+    # 2. Fallback: buscar en storage persistente
+    scan_data = get_scan(scan_id)
+    if not scan_data:
         return jsonify({"error": "Scan no encontrado"}), 404
 
-    task = active_scans[scan_id]["task"]
-
-    if task.status != "completed":
+    if scan_data.get("status") != "completed":
         return jsonify(
             {
                 "error": "Scan aún no completado",
-                "status": task.status,
-                "progress": task.progress,
+                "status": scan_data.get("status", "unknown"),
+                "progress": scan_data.get("progress", 0),
             }
         ), 400
 
-    return jsonify(task.results)
+    results = scan_data.get("results")
+    if not results:
+        return jsonify({"error": "Resultados no disponibles"}), 404
+
+    return jsonify(results)
 
 
 @app.route("/spectrum/<scan_id>/<ap_ip>")
@@ -1178,34 +1197,41 @@ def spectrum_view(ip):
 def get_spectrum_data_api(ip):
     """Get spectrum data for specific IP"""
 
+    # Helper to extract spectrum response from analysis_results dict
+    def _extract_spectrum(analysis_results):
+        if not isinstance(analysis_results, dict):
+            return None
+        if ip in analysis_results and "raw_spectrum" in analysis_results[ip]:
+            raw_data = analysis_results[ip]["raw_spectrum"]
+            if raw_data:
+                return jsonify(
+                    {
+                        "ip": ip,
+                        "frequencies": [p["freq"] for p in raw_data],
+                        "noise_levels": [p["noise"] for p in raw_data],
+                        "mean_noise": sum(p["noise"] for p in raw_data) / len(raw_data),
+                    }
+                )
+        return None
+
     # 1. Buscar en active_scans (scans en memoria)
-    for scan_id, data in active_scans.items():
-        # Verificar si hay resultados de análisis
-        if "scan_results" in data and data.get("scan_results"):
-            # Revisar si analysis_results está dentro de scan_results (depende de cómo lo estructuramos en ScanTask)
-            results = data["scan_results"]
-            if "analysis_results" in results:
-                analysis = results["analysis_results"]
-                if ip in analysis and "raw_spectrum" in analysis[ip]:
-                    # EUREKA: Encontramos los datos reales
-                    raw_data = analysis[ip]["raw_spectrum"]
+    for _scan_id, data in active_scans.items():
+        task = data.get("task")
+        if task and hasattr(task, "results") and task.results:
+            resp = _extract_spectrum(task.results.get("analysis_results"))
+            if resp:
+                return resp
 
-                    return jsonify(
-                        {
-                            "ip": ip,
-                            "frequencies": [p["freq"] for p in raw_data],
-                            "noise_levels": [p["noise"] for p in raw_data],
-                            "mean_noise": sum(p["noise"] for p in raw_data)
-                            / len(raw_data)
-                            if raw_data
-                            else -85,
-                        }
-                    )
+    # 2. Fallback: buscar en storage persistente
+    stored = get_stored_scans()
+    for _scan_id, scan_data in stored.items():
+        results = scan_data.get("results")
+        if results:
+            resp = _extract_spectrum(results.get("analysis_results"))
+            if resp:
+                return resp
 
-    # 2. Si falló lo anterior, intentar buscar si el escaneo terminó pero aún tenemos referencia en active_scans
-    # (El loop cubre active_scans, así que si no está ahí, no está en memoria)
-
-    logger.warning(f"No se encontraron datos de espectro para IP {ip} en memoria.")
+    logger.warning(f"No se encontraron datos de espectro para IP {ip}.")
     return jsonify(
         {
             "error": "No se encontraron datos de espectro para esta IP. (Prueba realizar un nuevo escaneo)"
@@ -1233,6 +1259,9 @@ def list_scans():
     }
     """
     scans = []
+    seen_ids = set()
+
+    # 1. Scans desde memoria (tienen estado en tiempo real)
     for scan_id, scan_data in active_scans.items():
         task = scan_data["task"]
         scans.append(
@@ -1242,6 +1271,22 @@ def list_scans():
                 "status": task.status,
                 "progress": task.progress,
                 "ap_count": len(scan_data["ap_ips"]),
+            }
+        )
+        seen_ids.add(scan_id)
+
+    # 2. Merge scans desde storage persistente (dedup por scan_id)
+    stored = get_stored_scans()
+    for scan_id, scan_data in stored.items():
+        if scan_id in seen_ids:
+            continue
+        scans.append(
+            {
+                "scan_id": scan_id,
+                "created_at": scan_data.get("created_at", ""),
+                "status": scan_data.get("status", "unknown"),
+                "progress": scan_data.get("progress", 0),
+                "ap_count": scan_data.get("ap_count", len(scan_data.get("ap_ips", []))),
             }
         )
 
