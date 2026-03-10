@@ -15,10 +15,8 @@ Escenarios cubiertos:
 
 import json
 import os
-import tempfile
 import threading
 import pytest
-from unittest.mock import patch
 
 from app.audit_manager import AuditManager, AuditLogException
 

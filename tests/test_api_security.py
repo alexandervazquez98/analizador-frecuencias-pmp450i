@@ -17,7 +17,7 @@ Escenarios cubiertos:
 import json
 import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from app.audit_manager import AuditManager
 

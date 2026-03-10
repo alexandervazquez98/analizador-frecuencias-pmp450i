@@ -154,7 +154,6 @@ class FrequencyAnalyzer:
         }
 
         # Encontrar la modulación base (quitando [degradado] y otros textos)
-        base_mod = "Inestable"
         for key in mod_efficiency:
             if key.split("(")[0] in modulation:  # Match por nombre principal
                 # Si la string contiene la clave exactamente, es mejor
@@ -1005,7 +1004,7 @@ def main():
     ip = sys.argv[1]
 
     print(f"\n{'=' * 70}")
-    print(f"  MATRIZ DE CALIFICACIÓN DE FRECUENCIAS - Cambium PMP 450i")
+    print("  MATRIZ DE CALIFICACIÓN DE FRECUENCIAS - Cambium PMP 450i")
     print(f"{'=' * 70}")
     print(f"AP: {ip}")
     print(f"{'=' * 70}\n")

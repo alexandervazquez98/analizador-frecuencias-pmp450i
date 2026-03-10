@@ -8,8 +8,7 @@ Se usan datos sintéticos (SpectrumPoint) para aislar cálculos de I/O real.
 """
 
 import pytest
-import numpy as np
-from app.frequency_analyzer import FrequencyAnalyzer, SpectrumPoint, FrequencyScore
+from app.frequency_analyzer import FrequencyAnalyzer, SpectrumPoint
 
 
 # ===========================================================================

@@ -551,7 +551,7 @@ class TowerScanner:
         # =========================================================================
         active_sms_started = []
         if active_sms_prepared:
-            self._log(f"--- FASE 2: Iniciando Escaneo en SMs (Sincronizado) ---")
+            self._log("--- FASE 2: Iniciando Escaneo en SMs (Sincronizado) ---")
             # Pequeña pausa para asegurar que todos procesaron la preparación
             await asyncio.sleep(1)
 
@@ -582,17 +582,16 @@ class TowerScanner:
                 )
                 return results
 
-            self._log(f"Todos los SMs iniciados correctamente.")
+            self._log("Todos los SMs iniciados correctamente.")
 
         # =========================================================================
         # FASE 3: INICIO DE AP (Solo si superamos los candados)
         # =========================================================================
         active_aps = []
         if valid_aps:
-            self._log(f"--- FASE 3: Iniciando AP ---")
+            self._log("--- FASE 3: Iniciando AP ---")
             # Usar prepare + start para AP también por consistencia, o el helper viejo
             # Usaremos el flow directo
-            ap_tasks = []
             for ip in valid_aps:
                 # Secuencial para AP para asegurar control
                 res_prep = await self._prepare_scan_async(ip, "AP")
@@ -631,11 +630,6 @@ class TowerScanner:
 
         self._log("Tower Scan finalizado.")
         return results
-
-    def _check_device_access(self, ip: str) -> Tuple[str, bool, str]:
-        """Deprecated internal check, mapped to new logic"""
-        # This was single-community check. New logic is inside validate_and_filter_devices
-        pass
 
     def _snmp_get_oid_raw(
         self, ip: str, oid: str, community: str
@@ -701,7 +695,7 @@ def main():
         sys.exit(1)
 
     print(f"\n{'=' * 60}")
-    print(f"  TOWER SCAN - Cambium PMP 450i")
+    print("  TOWER SCAN - Cambium PMP 450i")
     print(f"{'=' * 60}")
     print(f"APs a escanear: {len(ips)}")
     print(f"Comunidad SNMP: {community}")

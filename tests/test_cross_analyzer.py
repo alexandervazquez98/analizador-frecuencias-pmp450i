@@ -10,10 +10,8 @@ Umbrales clave:
 - Veto Penalty: -50 pts por cada SM que veta
 """
 
-import pytest
-import numpy as np
-from app.frequency_analyzer import FrequencyAnalyzer, SpectrumPoint
-from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData, CrossAnalysisResult
+from app.frequency_analyzer import SpectrumPoint
+from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData
 
 
 # ===========================================================================
@@ -236,7 +234,6 @@ class TestCombinedScore:
 
         result = results[0]
         # With one SM vetoing, combined_score = ap_score + VETO_PENALTY
-        expected_max = result.ap_score + analyzer.VETO_PENALTY  # ap_score - 50
         assert result.combined_score <= result.ap_score  # penalized
 
     def test_multiple_vetos_stack_penalty(self):

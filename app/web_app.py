@@ -9,6 +9,7 @@ from app.tower_scan import TowerScanner
 from app.frequency_analyzer import FrequencyAnalyzer, analyze_ap
 from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData
 from app.audit_manager import AuditManager, AuditLogException
+from app.cnmaestro_client import CnMaestroClient
 from functools import wraps
 import asyncio
 import threading
@@ -19,7 +20,6 @@ import logging
 import os
 import json
 from pathlib import Path
-import requests
 
 # Compatibilidad cross-platform para file locking (fcntl es Unix-only)
 try:
@@ -276,7 +276,7 @@ class ScanTask:
             scan_results = await scanner.start_tower_scan()
 
             self.progress = 40
-            self.log(f"Fase de escaneo completada. Procesando resultados...")
+            self.log("Fase de escaneo completada. Procesando resultados...")
 
             # Extraer resultados por tipo (tower_scan devuelve dict plano {ip: result})
             ap_scan_results = {
@@ -339,7 +339,7 @@ class ScanTask:
             if not completed_aps:
                 error_msg = f"Ningún AP completó el escaneo exitosamente. APs fallidos: {len(failed_aps)}"
                 if failed_aps:
-                    error_msg += f"\nDetalles:\n"
+                    error_msg += "\nDetalles:\n"
                     for ip in failed_aps:
                         res = ap_scan_results[ip]
                         msg = (
@@ -1102,8 +1102,6 @@ def get_scan_status(scan_id: str):
 
     return jsonify(response)
 
-
-from app.cnmaestro_client import CnMaestroClient
 
 # CnMaestro Configuration (desde variables de entorno)
 CNMAESTO_URL = os.environ.get("CNMAESTRO_URL", "https://10.3.152.206/api/v1")

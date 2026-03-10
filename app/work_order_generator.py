@@ -4,7 +4,7 @@ Transforma resultados técnicos en instrucciones claras para técnicos de campo
 """
 
 import datetime
-from typing import Dict, Optional, List
+from typing import Dict
 
 class WorkOrderGenerator:
     """Generador de Órdenes de Trabajo para PMP 450i"""

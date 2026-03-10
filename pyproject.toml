@@ -1,0 +1,8 @@
+[tool.ruff]
+# Ruff linter configuration
+
+[tool.ruff.lint.per-file-ignores]
+# tower_scan.py uses `from pysnmp.hlapi import *` because pysnmp uses
+# lazy submodule loading that prevents explicit named imports.
+# F403: star import used; F405: name may be undefined from star import
+"app/tower_scan.py" = ["F403", "F405"]

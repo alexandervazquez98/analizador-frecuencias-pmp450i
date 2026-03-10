@@ -12,7 +12,6 @@ Diseño:       03_design.md § D1 — Diseño del Sistema de Auditoría
 """
 
 import json
-import os
 import logging
 from datetime import datetime, timezone
 from threading import Lock
