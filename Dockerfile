@@ -32,12 +32,10 @@ RUN pip install --upgrade pip && \
 COPY app/ ./app/
 COPY static/ ./static/
 
-# Crear usuario no-root para seguridad
+# Crear usuario no-root para seguridad y directorios necesarios
 RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/data /app/logs && \
     chown -R appuser:appuser /app
-
-# Create data directory for unified SQLite DB (analyzer.db — v3.0.0)
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
 USER appuser
 
