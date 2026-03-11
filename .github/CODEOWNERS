@@ -1,0 +1,10 @@
+# Propietario general de todo el repo
+* @alexandervazquez98
+
+# Archivos críticos — requieren aprobación obligatoria
+*.env @alexandervazquez98
+*.config.js @alexandervazquez98
+*.yaml @alexandervazquez98
+*.yml @alexandervazquez98
+.github/ @alexandervazquez98
+package.json @alexandervazquez98
