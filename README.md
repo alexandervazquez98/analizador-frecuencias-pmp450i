@@ -801,9 +801,9 @@ docker compose up -d --build
 
 El `docker-compose.yml` pasa automáticamente todas las variables del `.env` al contenedor. El volumen `./data:/app/data` garantiza que la base de datos SQLite persiste entre reinicios.
 
-> **Nota:** Si ejecutas Docker como root, crea el directorio `logs` y asigna permisos antes de levantar el contenedor:
+> **Nota:** Si ejecutas Docker como root, crea los directorios `data` y `logs` con permisos antes de levantar el contenedor:
 > ```bash
-> sudo mkdir -p logs && sudo chown -R 1000:1000 logs
+> sudo mkdir -p data logs && sudo chown -R 1000:1000 data logs
 > ```
 
 ### Health check
