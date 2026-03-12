@@ -645,6 +645,18 @@ details summary:hover {
     .advanced-fields {
         grid-template-columns: 1fr;
     }
+
+    /* Issue #6 — Log de Ejecución: altura mínima en móvil */
+    .log-output {
+        max-height: 200px;
+        min-height: 100px;
+    }
+}
+
+/* Issue #6 — Log de Ejecución: evitar colapso en layouts flex vh-100 */
+#logOutput {
+    min-height: 120px;
+    flex-shrink: 0;
 }
 
 /* Scrollbar */

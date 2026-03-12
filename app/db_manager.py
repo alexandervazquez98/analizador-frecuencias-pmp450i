@@ -148,15 +148,17 @@ class DatabaseManager:
 
         Currently handles:
           - Adding 'role' column to users table if missing (upgrade from change-003).
+          - Adding 'logs' column to scans table if missing (Issue #7 — persist execution logs).
         """
         with self._lock:
             conn = self.get_connection()
             try:
-                columns = {
+                # Migration: users.role column (change-003 upgrade)
+                user_columns = {
                     row[1]
                     for row in conn.execute("PRAGMA table_info(users)").fetchall()
                 }
-                if "role" not in columns:
+                if "role" not in user_columns:
                     conn.execute(
                         "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'operator'"
                     )
@@ -166,6 +168,16 @@ class DatabaseManager:
                     )
                     conn.commit()
                     logger.info("Migration: added 'role' column to users table")
+
+                # Migration: scans.logs column (Issue #7 — execution log persistence)
+                scan_columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(scans)").fetchall()
+                }
+                if "logs" not in scan_columns:
+                    conn.execute("ALTER TABLE scans ADD COLUMN logs TEXT")
+                    conn.commit()
+                    logger.info("Migration: added 'logs' column to scans table")
             finally:
                 conn.close()
 

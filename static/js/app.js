@@ -767,6 +767,17 @@ function addLogEntry(msg, type = 'info', detailed = false) {
 }
 
 function resetInterface() {
+    // Stop any active polling
+    if (appState.pollInterval) {
+        clearInterval(appState.pollInterval);
+        appState.pollInterval = null;
+    }
+    // Reset all application state (Issue #5)
+    appState.currentScanId = null;
+    appState.scanResults = null;
+    appState.lastLogCount = 0;
+    // chartInstance is kept — it will be replaced on next displayResults()
+
     elements.resultsPanel.style.display = 'none';
     elements.statusPanel.style.display = 'none';
     elements.welcomePanel.style.display = 'block';
