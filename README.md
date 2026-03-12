@@ -112,6 +112,13 @@ Plataforma web de automatización de escaneo y análisis de espectro RF para equ
 - Docker + Docker Compose (para despliegue en producción)
 - Acceso SNMP (comunidad de lectura/escritura) a los equipos Cambium PMP450i
 
+> ⚠️ **Importante:** Se recomienda **NO** ejecutar el contenedor como usuario root, ya que causa problemas de permisos con los directorios persistidos.
+>
+> Si ejecutas Docker como root, crea los directorios con los permisos correctos antes de levantar el contenedor:
+> ```bash
+> sudo mkdir -p data logs && sudo chown -R 1000:1000 data logs
+> ```
+
 ### Desarrollo local
 
 ```bash
