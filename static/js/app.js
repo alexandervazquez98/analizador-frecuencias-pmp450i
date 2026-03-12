@@ -748,10 +748,26 @@ function resetInterface() {
     appState.scanResults = null;
     appState.lastLogCount = 0;
 
+    // Hide results and status panels, show empty state
     if (elements.resultsPanel) elements.resultsPanel.style.display = 'none';
     if (elements.statusPanel) elements.statusPanel.style.display = 'none';
     if (elements.emptyState) elements.emptyState.style.display = 'flex';
+
+    // Clear form fields
     clearForm();
+
+    // Reset results content
+    if (elements.resultsSummary) elements.resultsSummary.innerHTML = '';
+    if (elements.frequencyRecommendations) elements.frequencyRecommendations.innerHTML = '';
+    if (elements.installationSheetContent) elements.installationSheetContent.innerHTML = '';
+}
+
+function clearForm() {
+    elements.apIPs.value = '';
+    elements.smIPs.value = '';
+    if (elements.ticketId) elements.ticketId.value = '';
+    if (elements.startScanBtn) elements.startScanBtn.disabled = true;
+    elements.logOutput.innerHTML = '';
 }
 
 function clearForm() {
