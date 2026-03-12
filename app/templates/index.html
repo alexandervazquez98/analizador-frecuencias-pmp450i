@@ -7,14 +7,14 @@
     <title>Tower Scan - PMP 450i Analyzer</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=10">
 </head>
 
 <body>
     <!-- Inject user role for JS -->
     <script>window.userRole = "{{ session.get('role', 'operator') }}";</script>
 
-    <div class="container-fluid p-4 d-flex flex-column vh-100" style="overflow: hidden;">
+    <div class="container-fluid p-3 p-md-4 d-flex flex-column main-container">
         <!-- Header -->
         <header class="header mb-2 text-center position-relative" style="padding: 15px 20px;">
             <div class="position-absolute top-0 end-0 p-3">
@@ -56,13 +56,13 @@
             </li>
         </ul>
 
-        <div class="tab-content flex-grow-1" style="min-height: 0; overflow: hidden;">
+        <div class="tab-content flex-grow-1 tab-content-responsive">
 
             <!-- ==================== PANEL ESCANEO (existing) ==================== -->
-            <div class="tab-pane fade show active h-100" id="panel-scan" role="tabpanel">
-                <div class="row g-3 h-100" style="min-height: 0;">
+            <div class="tab-pane fade show active panel-scan-responsive" id="panel-scan" role="tabpanel">
+                <div class="row g-3 scan-row-responsive" style="min-height: 0;">
                     <!-- Left Column: Config + Logs (Quadrants 1 & 3) -->
-                    <div class="col-md-6 d-flex flex-column gap-3 h-100">
+                    <div class="col-12 col-md-6 d-flex flex-column gap-3 col-scan-responsive">
                         <!-- Config Card (Auto Height) -->
                         <div class="card shadow-sm border-0 d-flex flex-column"
                             style="background: var(--card-bg); flex-shrink: 0;">
@@ -101,32 +101,7 @@
                                     </div>
                                 </div>
 
-                                <!-- Advanced Options -->
-                                <div class="accordion" id="advancedOptions">
-                                    <div class="accordion-item bg-transparent border-secondary">
-                                        <h2 class="accordion-header">
-                                            <button class="accordion-button collapsed bg-dark text-light py-2" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#collapseAdv">
-                                                <i class="bi bi-sliders me-2"></i> Opciones Avanzadas
-                                            </button>
-                                        </h2>
-                                        <div id="collapseAdv" class="accordion-collapse collapse"
-                                            data-bs-parent="#advancedOptions">
-                                            <div class="accordion-body text-light small">
-                                                <label class="form-label">Preferencias de Análisis</label>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="prioritizeUplink"
-                                                        checked>
-                                                    <label class="form-check-label">Priorizar Uplink (CCTV)</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="stabilityOverSpeed">
-                                                    <label class="form-check-label">Estabilidad > Velocidad</label>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+
 
                                 <!-- Recent History -->
                                 <div class="mt-4">
@@ -151,7 +126,7 @@
                                         for="detailedLogToggle">Verbose</label>
                                 </div>
                             </div>
-                            <div class="card-body p-0 d-flex flex-column overflow-hidden">
+                            <div class="card-body p-0 d-flex flex-column">
                                 <div id="logOutput" class="p-2 small font-monospace text-light flex-grow-1"
                                     style="overflow-y: auto; background: #1a1a1a;"></div>
                             </div>
@@ -159,7 +134,7 @@
                     </div>
 
                     <!-- Right Column: Targets + Results (Quadrants 2 & 4) -->
-                    <div class="col-md-6 d-flex flex-column gap-3 h-100">
+                    <div class="col-12 col-md-6 d-flex flex-column gap-3 col-scan-responsive">
                         <!-- Targets Card (Auto Height) -->
                         <div class="card shadow-sm border-0 d-flex flex-column"
                             style="background: var(--card-bg); flex-shrink: 0;">
@@ -168,7 +143,9 @@
                                 <button class="btn btn-sm btn-dark" id="openImportModalBtn"><i class="bi bi-cloud-arrow-up"></i>
                                     Importar</button>
                             </div>
-                            <div class="card-body d-flex flex-column overflow-hidden">
+                            <div class="card-body d-flex flex-column">
+                                <!-- Alert area for scan feedback (replaces window.alert) -->
+                                <div id="scanAlert" class="mb-2" style="display:none;"></div>
                                 <div class="row g-2 flex-grow-1">
                                     <div class="col-md-6 d-flex flex-column">
                                         <label class="form-label text-light small">IPs de APs (Una por línea)</label>
@@ -212,6 +189,13 @@
 
                         <!-- Quadrant 4: Results / Status / Welcome (Bottom Right) -->
                         <div class="flex-fill position-relative d-flex flex-column" style="min-height: 0;">
+                            <!-- Empty State (shown when no scan is running or completed) -->
+                            <div id="emptyState" class="card shadow-lg border-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center"
+                                style="background: var(--card-bg);">
+                                <i class="bi bi-broadcast" style="font-size: 3.5rem; color: var(--accent-color); opacity: 0.5;"></i>
+                                <h5 class="mt-3 text-light">Listo para analizar</h5>
+                                <p class="text-muted small mb-0">Completa el formulario y presiona <strong>Iniciar Análisis</strong>.</p>
+                            </div>
                             <!-- Status Panel -->
                             <div id="statusPanel" class="card shadow-lg border-0 w-100 h-100"
                                 style="background: var(--card-bg); display: none;">
@@ -504,57 +488,6 @@
         </footer>
     </div>
 
-    <!-- Spectrum Viewer Modal -->
-    <div class="modal fade" id="spectrumModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content bg-dark text-white">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-graph-up"></i> Visualizador de Espectro - <span
-                            id="spectrumModalTitle">AP</span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <canvas id="spectrumChart" style="max-height: 500px;"></canvas>
-                </div>
-                <div class="modal-footer border-secondary">
-                    <small class="text-muted me-auto">Datos en tiempo real obtenidos del radio AP.</small>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Recommendations Text Modal -->
-    <div class="modal fade" id="textRecommendationsModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content bg-dark text-white">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-clipboard-check"></i> Guía de Configuración</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div id="textRecommendationsContent" class="p-3"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="workOrderModal" class="modal work-order-modal">
-        <div class="modal-content wo-content">
-            <div class="wo-header">
-                <h2>Orden de Trabajo</h2>
-                <span class="wo-id" id="woIdDisplay">WO-PING</span>
-            </div>
-            <div id="workOrderContent" class="wo-body"></div>
-            <div class="wo-footer">
-                <button id="acknowledgeBtn" class="btn btn-success w-100">CONFIRMAR (ACK)</button>
-                <button id="closeWoBtn" class="btn btn-secondary mt-2">Cerrar</button>
-            </div>
-        </div>
-    </div>
-
     <!-- CMMAESTRO IMPORT MODAL -->
     <div id="importModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
@@ -604,8 +537,7 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=12"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=13"></script>
     <script src="{{ url_for('static', filename='js/towers.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='js/users.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='js/history.js') }}?v=1"></script>
