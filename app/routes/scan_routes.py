@@ -226,6 +226,7 @@ def start_scan(audit_manager=None):
             "config": config,
             "status": "started",
             "progress": 0,
+            "username": session.get("user", "unknown"),
         }
 
         # Persist initial scan record to SQLite
@@ -405,6 +406,7 @@ def list_scans():
                 "status": task.status,
                 "progress": task.progress,
                 "ap_count": len(scan_data["ap_ips"]),
+                "username": scan_data.get("username", "unknown"),
             }
         )
         seen_ids.add(scan_id)
@@ -426,6 +428,7 @@ def list_scans():
                     "status": scan_row.get("status", "unknown"),
                     "progress": 0,
                     "ap_count": ap_count,
+                    "username": scan_row.get("username", "unknown"),
                 }
             )
 
