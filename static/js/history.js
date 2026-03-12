@@ -109,6 +109,7 @@ async function renderHistoryPanel() {
                     <td class="small align-middle">${date}</td>
                     <td class="align-middle"><span class="badge bg-${badgeColor}">${scan.status || 'unknown'}</span></td>
                     <td class="text-center align-middle">${scan.ap_count || 0}</td>
+                    <td class="align-middle">${escapeHtml(scan.username || 'unknown')}</td>
                     <td class="text-center align-middle text-info small">${escapeHtml(ticketDisplay)}</td>
                     <td class="align-middle">
                         ${isCompleted
@@ -131,6 +132,7 @@ async function renderHistoryPanel() {
                             <th>Fecha</th>
                             <th>Estado</th>
                             <th class="text-center">APs</th>
+                            <th>Usuario</th>
                             <th class="text-center">Ticket</th>
                             <th>Acción</th>
                         </tr>

@@ -232,6 +232,7 @@ def start_scan(audit_manager=None):
             "config": config,
             "status": "started",
             "progress": 0,
+            "username": session.get("user", "unknown"),
             "ticket_id": ticket_id_val,
         }
 
@@ -407,6 +408,7 @@ def list_scans():
                 "status": task.status,
                 "progress": task.progress,
                 "ap_count": len(scan_data["ap_ips"]),
+                "username": scan_data.get("username", "unknown"),
                 "ticket_id": scan_data.get("ticket_id", 0),
             }
         )
@@ -429,7 +431,8 @@ def list_scans():
                     "status": scan_row.get("status", "unknown"),
                     "progress": 0,
                     "ap_count": ap_count,
-                    "ticket_id": scan_row.get("ticket_id", 0),
+                "username": scan_row.get("username", "unknown"),
+                "ticket_id": scan_row.get("ticket_id", 0),
                 }
             )
 
