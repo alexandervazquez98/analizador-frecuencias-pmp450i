@@ -99,6 +99,7 @@ async function renderHistoryPanel() {
             const badgeColor = statusColors[scan.status] || 'secondary';
             const shortId = scan.scan_id ? scan.scan_id.substring(0, 12) + '...' : 'N/A';
             const isCompleted = scan.status === 'completed';
+            const ticketDisplay = scan.ticket_id ? `#${scan.ticket_id}` : '—';
 
             return `
                 <tr class="${isCompleted ? 'scan-row-clickable' : 'opacity-75'}"
@@ -108,6 +109,7 @@ async function renderHistoryPanel() {
                     <td class="small align-middle">${date}</td>
                     <td class="align-middle"><span class="badge bg-${badgeColor}">${scan.status || 'unknown'}</span></td>
                     <td class="text-center align-middle">${scan.ap_count || 0}</td>
+                    <td class="text-center align-middle text-info small">${escapeHtml(ticketDisplay)}</td>
                     <td class="align-middle">
                         ${isCompleted
                             ? `<button class="btn btn-outline-info btn-sm"
@@ -129,6 +131,7 @@ async function renderHistoryPanel() {
                             <th>Fecha</th>
                             <th>Estado</th>
                             <th class="text-center">APs</th>
+                            <th class="text-center">Ticket</th>
                             <th>Acción</th>
                         </tr>
                     </thead>

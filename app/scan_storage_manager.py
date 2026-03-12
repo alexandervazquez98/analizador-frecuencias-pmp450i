@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Fields that are stored as JSON in the DB and deserialized on read
-_JSON_FIELDS = ("ap_ips", "sm_ips", "config", "results", "recommendations")
+_JSON_FIELDS = ("ap_ips", "sm_ips", "config", "results", "recommendations", "logs")
 
 
 def _serialize(value):
@@ -66,9 +66,9 @@ class ScanStorageManager:
             data: Dict that may contain any of:
                 username, ticket_id, scan_type, ap_ips, sm_ips, config,
                 status, progress, results, error, completed_at,
-                duration_seconds, tower_id, user_id, recommendations.
+                duration_seconds, tower_id, user_id, recommendations, logs.
                 ap_ips/sm_ips are serialized as JSON if they are lists.
-                config/results/recommendations are serialized as JSON if dicts/lists.
+                config/results/recommendations/logs are serialized as JSON if dicts/lists.
 
         Notes:
             - Uses INSERT OR REPLACE (UPSERT) semantics.
@@ -95,6 +95,7 @@ class ScanStorageManager:
             if data.get("recommendations") is not None
             else None
         )
+        logs = _serialize(data.get("logs")) if data.get("logs") is not None else None
         tower_id = data.get("tower_id")
         user_id = data.get("user_id")
         completed_at = data.get("completed_at")
@@ -110,7 +111,34 @@ class ScanStorageManager:
                         """INSERT OR REPLACE INTO scans
                            (id, tower_id, user_id, username, ticket_id, scan_type,
                             status, ap_ips, sm_ips, config, results, recommendations,
-                            started_at, completed_at, duration_seconds, error)
+                            logs, started_at, completed_at, duration_seconds, error)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            scan_id,
+                            tower_id,
+                            user_id,
+                            username,
+                            ticket_id,
+                            scan_type,
+                            status,
+                            ap_ips,
+                            sm_ips,
+                            config,
+                            results,
+                            recommendations,
+                            logs,
+                            started_at,
+                            completed_at,
+                            duration_seconds,
+                            error,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO scans
+                           (id, tower_id, user_id, username, ticket_id, scan_type,
+                            status, ap_ips, sm_ips, config, results, recommendations,
+                            logs, completed_at, duration_seconds, error)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             scan_id,
@@ -125,32 +153,7 @@ class ScanStorageManager:
                             config,
                             results,
                             recommendations,
-                            started_at,
-                            completed_at,
-                            duration_seconds,
-                            error,
-                        ),
-                    )
-                else:
-                    conn.execute(
-                        """INSERT OR REPLACE INTO scans
-                           (id, tower_id, user_id, username, ticket_id, scan_type,
-                            status, ap_ips, sm_ips, config, results, recommendations,
-                            completed_at, duration_seconds, error)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            scan_id,
-                            tower_id,
-                            user_id,
-                            username,
-                            ticket_id,
-                            scan_type,
-                            status,
-                            ap_ips,
-                            sm_ips,
-                            config,
-                            results,
-                            recommendations,
+                            logs,
                             completed_at,
                             duration_seconds,
                             error,
@@ -254,6 +257,7 @@ class ScanStorageManager:
         scan_id: str,
         results: dict,
         duration_seconds: float = None,
+        logs: list = None,
     ) -> None:
         """Mark a scan as completed and persist its results.
 
@@ -261,21 +265,32 @@ class ScanStorageManager:
             scan_id:          Unique scan identifier.
             results:          Final results dict to store (serialized as JSON).
             duration_seconds: Optional elapsed time in seconds.
+            logs:             Optional list of log entries to persist (Issue #7).
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         results_json = _serialize(results)
+        logs_json = _serialize(logs) if logs is not None else None
+
+        sets = [
+            "status = 'completed'",
+            "results = ?",
+            "completed_at = ?",
+            "duration_seconds = ?",
+        ]
+        params = [results_json, now, duration_seconds]
+
+        if logs_json is not None:
+            sets.append("logs = ?")
+            params.append(logs_json)
+
+        params.append(scan_id)
 
         with self.db._lock:
             conn = self.db.get_connection()
             try:
                 conn.execute(
-                    """UPDATE scans
-                       SET status = 'completed',
-                           results = ?,
-                           completed_at = ?,
-                           duration_seconds = ?
-                       WHERE id = ?""",
-                    (results_json, now, duration_seconds, scan_id),
+                    f"UPDATE scans SET {', '.join(sets)} WHERE id = ?",
+                    params,
                 )
                 conn.commit()
             except Exception:

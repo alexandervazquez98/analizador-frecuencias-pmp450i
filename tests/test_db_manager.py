@@ -111,6 +111,7 @@ class TestSchemaCreation:
             "config",
             "results",
             "recommendations",
+            "logs",
             "started_at",
             "completed_at",
             "duration_seconds",
