@@ -1,6 +1,7 @@
 /* Reset y Variables */
 :root {
     --primary-color: #2196F3;
+    --accent-color: #2196F3;
     --secondary-color: #4CAF50;
     --danger-color: #f44336;
     --warning-color: #ff9800;
@@ -173,7 +174,16 @@ input[type="file"]::-webkit-file-upload-button {
     margin-top: 20px;
 }
 
-.btn {
+/* Button group layout helper (non-Bootstrap) */
+.button-group {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+/* Custom button overrides — only for legacy .btn elements NOT using Bootstrap btn-* */
+.btn-legacy {
     padding: 12px 24px;
     border: none;
     border-radius: 8px;
@@ -184,36 +194,36 @@ input[type="file"]::-webkit-file-upload-button {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.btn:hover {
+.btn-legacy:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
-.btn:active {
+.btn-legacy:active {
     transform: translateY(0);
 }
 
-.btn-primary {
+.btn-legacy-primary {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
 }
 
-.btn-secondary {
+.btn-legacy-secondary {
     background: #555;
     color: white;
 }
 
-.btn-success {
+.btn-legacy-success {
     background: var(--success-color);
     color: white;
 }
 
-.btn-info {
+.btn-legacy-info {
     background: var(--primary-color);
     color: white;
 }
 
-.btn:disabled {
+.btn-legacy:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
@@ -523,8 +533,8 @@ details summary:hover {
     color: var(--text-muted);
 }
 
-/* Modal */
-.modal {
+/* Import Modal — custom non-Bootstrap modal used by #importModal */
+#importModal.modal {
     display: none;
     position: fixed;
     z-index: 1000;
@@ -536,7 +546,7 @@ details summary:hover {
     background-color: rgba(0, 0, 0, 0.8);
 }
 
-.modal-content {
+#importModal .modal-content {
     background: var(--card-bg);
     margin: 5% auto;
     padding: 30px;
@@ -632,11 +642,7 @@ details summary:hover {
     .button-group {
         flex-direction: column;
     }
-    
-    .btn {
-        width: 100%;
-    }
-    
+
     .status-info {
         flex-direction: column;
         align-items: flex-start;
@@ -653,10 +659,102 @@ details summary:hover {
     }
 }
 
-/* Issue #6 — Log de Ejecución: evitar colapso en layouts flex vh-100 */
-#logOutput {
-    min-height: 120px;
-    flex-shrink: 0;
+/* ============================================================
+   RESPONSIVE LAYOUT — change-006
+   Strategy: desktop keeps fixed-height flex layout (vh-100);
+   tablet/mobile switches to natural scroll flow.
+   ============================================================ */
+
+/* Desktop: full-height fixed layout */
+@media (min-width: 768px) {
+    .main-container {
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    .tab-content-responsive {
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .panel-scan-responsive {
+        height: 100%;
+    }
+
+    .scan-row-responsive {
+        height: 100%;
+    }
+
+    .col-scan-responsive {
+        height: 100%;
+    }
+}
+
+/* Mobile / tablet: natural scroll, no height constraints */
+@media (max-width: 767.98px) {
+    .main-container {
+        min-height: 100vh;
+        overflow: visible;
+    }
+
+    .tab-content-responsive {
+        overflow: visible;
+    }
+
+    .panel-scan-responsive,
+    .scan-row-responsive,
+    .col-scan-responsive {
+        height: auto !important;
+        min-height: 0;
+    }
+
+    /* Textareas: allow resize on mobile */
+    #apIPs,
+    #smIPs {
+        min-height: 120px !important;
+        resize: vertical !important;
+    }
+
+    /* Tables: horizontal scroll on small screens */
+    .table-responsive-mobile {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Results/status panels: auto height on mobile */
+    #statusPanel,
+    #resultsPanel,
+    #emptyState {
+        height: auto !important;
+        min-height: 300px;
+    }
+
+    /* Log output: smaller on mobile */
+    #logOutput {
+        max-height: 200px;
+        min-height: 80px;
+    }
+
+    /* Header adjustments */
+    .header {
+        padding: 10px 15px !important;
+    }
+
+    .header h1 {
+        font-size: 1.4rem;
+    }
+}
+
+/* Wrap all tables in results in horizontal scroll */
+#frequencyRecommendations table,
+#resultsSummary table,
+#installationSheetContent table,
+.sm-details-table {
+    min-width: 400px;
+}
+
+.card-body .tab-content {
+    overflow-x: auto;
 }
 
 /* Scrollbar */
@@ -734,25 +832,18 @@ details summary:hover {
     opacity: 0.7;
 }
 
-.badge {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: bold;
-}
-
+/* Custom badge colors — complement Bootstrap .badge */
 .badge-success {
-    background: var(--success-color);
-    color: #fff;
+    background-color: var(--success-color) !important;
+    color: #fff !important;
 }
 
 .badge-danger {
-    background: var(--danger-color);
-    color: #fff;
+    background-color: var(--danger-color) !important;
+    color: #fff !important;
 }
 
 .badge-warning {
-    background: var(--warning-color);
-    color: #fff;
+    background-color: var(--warning-color) !important;
+    color: #fff !important;
 }
