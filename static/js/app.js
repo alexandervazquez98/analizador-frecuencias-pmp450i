@@ -8,16 +8,11 @@ const appState = {
     currentScanId: null,
     pollInterval: null,
     scanResults: null,
-    chartInstance: null,
     lastLogCount: 0
 };
 
 // Referencias a elementos DOM
 let elements = {};
-
-// Modals
-let spectrumModal = null;
-let textRecommendationsModal = null;
 
 // ==================== INICIALIZACIÓN ====================
 
@@ -52,7 +47,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dashboard
         welcomeMessage: document.getElementById('welcomeMessage'),
-        spectrumChartCanvas: document.getElementById('spectrumChart'),
 
         // Import Modal
         openImportBtn: document.getElementById('openImportModalBtn'),
@@ -71,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Panels
         statusPanel: document.getElementById('statusPanel'),
         resultsPanel: document.getElementById('resultsPanel'),
-        welcomePanel: document.getElementById('welcomePanel'),
+        emptyState: document.getElementById('emptyState'),
 
         // Status
         statusBadge: document.getElementById('statusBadge'),
@@ -89,17 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Recent Scans
         recentScans: document.getElementById('recentScans')
     };
-
-    // Inicializar Modales Bootstrap
-    try {
-        const specModalEl = document.getElementById('spectrumModal');
-        if (specModalEl) spectrumModal = new bootstrap.Modal(specModalEl);
-
-        const recModalEl = document.getElementById('textRecommendationsModal');
-        if (recModalEl) textRecommendationsModal = new bootstrap.Modal(recModalEl);
-    } catch (e) {
-        console.warn("Bootstrap modals not initialized (might be missing in HTML yet)", e);
-    }
 
     // Configurar event listeners
     setupEventListeners();
@@ -190,13 +173,6 @@ function setupEventListeners() {
 
     // Close modals on outside click
     window.onclick = function (event) {
-        // Assuming recommendationsModal and workOrderModal are defined elsewhere or will be added
-        // if (event.target == elements.recommendationsModal) {
-        //     elements.recommendationsModal.style.display = "none";
-        // }
-        // if (event.target == elements.workOrderModal) {
-        //      elements.workOrderModal.style.display = "none";
-        // }
         if (elements.importModal && event.target == elements.importModal) {
             elements.importModal.style.display = "none";
         }
@@ -216,13 +192,13 @@ function setupFileUpload(fileInput, targetTextarea, type) {
             if (ips.length > 0) {
                 const current = targetTextarea.value.trim();
                 targetTextarea.value = current ? current + '\n' + ips.join('\n') : ips.join('\n');
-                alert(`Se cargaron ${ips.length} IPs de ${type} correctamente.`);
+                showPanelAlert('scanAlert', `Se cargaron ${ips.length} IPs de ${type} correctamente.`, 'success');
             } else {
-                alert('No se encontraron IPs válidas en el archivo.');
+                showPanelAlert('scanAlert', 'No se encontraron IPs válidas en el archivo.', 'warning');
             }
             fileInput.value = ''; // Reset
         } catch (error) {
-            alert(`Error leyendo archivo: ${error.message}`);
+            showPanelAlert('scanAlert', `Error leyendo archivo: ${error.message}`, 'danger');
         }
     });
 }
@@ -246,14 +222,14 @@ async function startScan() {
     const smIPs = parseIPList(elements.smIPs.value);
 
     if (apIPs.length === 0) {
-        alert('Debe ingresar al menos una IP de Access Point.');
+        showPanelAlert('scanAlert', 'Debe ingresar al menos una IP de Access Point.', 'warning');
         return;
     }
 
     // Validate ticket_id
     const ticketId = elements.ticketId ? parseInt(elements.ticketId.value) : null;
     if (!ticketId || ticketId <= 0) {
-        alert('Debe ingresar un Ticket ID valido (numero entero positivo).');
+        showPanelAlert('scanAlert', 'Debe ingresar un Ticket ID válido (número entero positivo).', 'warning');
         return;
     }
 
@@ -270,7 +246,7 @@ async function startScan() {
     };
 
     // UI Updates
-    if (elements.welcomePanel) elements.welcomePanel.style.display = 'none';
+    if (elements.emptyState) elements.emptyState.style.display = 'none';
     if (elements.resultsPanel) elements.resultsPanel.style.display = 'none';
     if (elements.statusPanel) elements.statusPanel.style.display = 'block';
 
@@ -296,8 +272,6 @@ async function startScan() {
         if (elements.scanIdDisplay) elements.scanIdDisplay.textContent = result.scan_id;
 
         addLogEntry(`Scan ID: ${result.scan_id}`, 'success');
-        addLogEntry(`Objetivo: ${result.ap_count} APs, ${result.sm_count || 0} SMs`, 'info');
-
         addLogEntry(`Objetivo: ${result.ap_count} APs, ${result.sm_count || 0} SMs`, 'info');
 
         appState.lastLogCount = 0; // Reset log counter
@@ -702,11 +676,10 @@ function openSpectrumViewer(ip) {
     console.log("Abriendo visualizador para", ip);
 
     if (!appState.currentScanId) {
-        // Intentar recuperar ID del resultado si no está en estado global
         if (appState.scanResults && appState.scanResults.scan_id) {
             appState.currentScanId = appState.scanResults.scan_id;
         } else {
-            alert("No se puede identificar el ID del escaneo. Por favor inicie un nuevo escaneo.");
+            showPanelAlert('scanAlert', 'No se puede identificar el ID del escaneo. Por favor inicie un nuevo escaneo.', 'warning');
             return;
         }
     }
@@ -717,18 +690,16 @@ function openSpectrumViewer(ip) {
 
 function openGlobalSpectrumViewer() {
     if (!appState.scanResults || !appState.scanResults.analysis_results) {
-        alert("No hay resultados de análisis disponibles.");
+        showPanelAlert('scanAlert', 'No hay resultados de análisis disponibles.', 'warning');
         return;
     }
 
-    // Buscar la primer IP de AP disponible
     const ips = Object.keys(appState.scanResults.analysis_results);
     if (ips.length === 0) {
-        alert("No se encontraron APs en los resultados.");
+        showPanelAlert('scanAlert', 'No se encontraron APs en los resultados.', 'warning');
         return;
     }
 
-    // Abrir el primero (o podría implementarse un selector si se desea)
     openSpectrumViewer(ips[0]);
 }
 
@@ -767,10 +738,36 @@ function addLogEntry(msg, type = 'info', detailed = false) {
 }
 
 function resetInterface() {
-    elements.resultsPanel.style.display = 'none';
-    elements.statusPanel.style.display = 'none';
-    elements.welcomePanel.style.display = 'block';
+    // Stop any active polling
+    if (appState.pollInterval) {
+        clearInterval(appState.pollInterval);
+        appState.pollInterval = null;
+    }
+    // Reset all application state
+    appState.currentScanId = null;
+    appState.scanResults = null;
+    appState.lastLogCount = 0;
+
+    // Hide results and status panels, show empty state
+    if (elements.resultsPanel) elements.resultsPanel.style.display = 'none';
+    if (elements.statusPanel) elements.statusPanel.style.display = 'none';
+    if (elements.emptyState) elements.emptyState.style.display = 'flex';
+
+    // Clear form fields
     clearForm();
+
+    // Reset results content
+    if (elements.resultsSummary) elements.resultsSummary.innerHTML = '';
+    if (elements.frequencyRecommendations) elements.frequencyRecommendations.innerHTML = '';
+    if (elements.installationSheetContent) elements.installationSheetContent.innerHTML = '';
+}
+
+function clearForm() {
+    elements.apIPs.value = '';
+    elements.smIPs.value = '';
+    if (elements.ticketId) elements.ticketId.value = '';
+    if (elements.startScanBtn) elements.startScanBtn.disabled = true;
+    elements.logOutput.innerHTML = '';
 }
 
 function clearForm() {
@@ -862,7 +859,7 @@ async function loadRecentScans() {
 
                     if (status.status === 'completed' && status.results) {
                         appState.currentScanId = scanId;
-                        if (elements.welcomePanel) elements.welcomePanel.style.display = 'none';
+                        if (elements.emptyState) elements.emptyState.style.display = 'none';
                         if (elements.statusPanel) elements.statusPanel.style.display = 'none';
                         displayResults(status.results);
                     }
@@ -897,17 +894,16 @@ async function openImportModal() {
     if (!elements.importModal) return;
     elements.importModal.style.display = 'block';
 
-    // Reset view
     if (elements.stepLoading) elements.stepLoading.style.display = 'block';
     if (elements.stepSelection) elements.stepSelection.style.display = 'none';
 
     try {
         const response = await authFetch('/api/cnmaestro/inventory');
-        if (!response) return; // Redirected to login
+        if (!response) return;
         const data = await response.json();
 
         if (data.error) {
-            alert('Error cargando inventario: ' + data.error);
+            showPanelAlert('scanAlert', 'Error cargando inventario: ' + data.error, 'danger');
             elements.importModal.style.display = 'none';
             return;
         }
@@ -919,7 +915,7 @@ async function openImportModal() {
         if (elements.stepSelection) elements.stepSelection.style.display = 'block';
 
     } catch (e) {
-        alert('Error conectando con el servidor: ' + e);
+        showPanelAlert('scanAlert', 'Error conectando con el servidor: ' + e, 'danger');
         elements.importModal.style.display = 'none';
     }
 }

@@ -202,6 +202,12 @@ def start_scan(audit_manager=None):
 
         scan_id = str(uuid.uuid4())
 
+        # Resolve username / ticket_id from session and audit_manager
+        username = session.get("user", "unknown")
+        ticket_id_val = 0
+        if audit_manager is not None:
+            ticket_id_val = int(getattr(audit_manager, "ticket_id", 0) or 0)
+
         # Get storage_manager from app config (may be None in tests without DB)
         storage_manager = current_app.config.get("scan_storage_manager")
 
@@ -227,22 +233,17 @@ def start_scan(audit_manager=None):
             "status": "started",
             "progress": 0,
             "username": session.get("user", "unknown"),
+            "ticket_id": ticket_id_val,
         }
 
         # Persist initial scan record to SQLite
         if storage_manager is not None:
             try:
-                # Resolve username / user_id from session
-                username = session.get("user", "unknown")
-                ticket_id_val = 0
-                if audit_manager is not None:
-                    ticket_id_val = getattr(audit_manager, "ticket_id", 0) or 0
-
                 storage_manager.save_scan(
                     scan_id,
                     {
                         "username": username,
-                        "ticket_id": int(ticket_id_val),
+                        "ticket_id": ticket_id_val,
                         "scan_type": "AP_SM_CROSS" if sm_ips else "AP_ONLY",
                         "ap_ips": ap_ips,
                         "sm_ips": sm_ips if sm_ips else None,
@@ -319,6 +320,7 @@ def get_scan_status(scan_id: str):
         "status": scan_data.get("status", "unknown"),
         "progress": scan_data.get("progress", 0),
         "error": scan_data.get("error"),
+        "logs": scan_data.get("logs") or [],
     }
 
     if scan_data.get("status") == "completed":
@@ -407,6 +409,7 @@ def list_scans():
                 "progress": task.progress,
                 "ap_count": len(scan_data["ap_ips"]),
                 "username": scan_data.get("username", "unknown"),
+                "ticket_id": scan_data.get("ticket_id", 0),
             }
         )
         seen_ids.add(scan_id)
@@ -428,7 +431,8 @@ def list_scans():
                     "status": scan_row.get("status", "unknown"),
                     "progress": 0,
                     "ap_count": ap_count,
-                    "username": scan_row.get("username", "unknown"),
+                "username": scan_row.get("username", "unknown"),
+                "ticket_id": scan_row.get("ticket_id", 0),
                 }
             )
 

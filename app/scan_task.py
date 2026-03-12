@@ -561,7 +561,10 @@ class ScanTask:
             if self.storage_manager is not None:
                 try:
                     self.storage_manager.complete_scan(
-                        self.scan_id, self.results, duration_seconds=duration
+                        self.scan_id,
+                        self.results,
+                        duration_seconds=duration,
+                        logs=self.logs,
                     )
                     logger.info(f"[{self.scan_id}] Resultados guardados en DB storage")
                 except Exception as exc:

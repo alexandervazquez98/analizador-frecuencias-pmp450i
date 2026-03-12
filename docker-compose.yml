@@ -23,6 +23,8 @@ services:
       - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
       # Base de datos unificada (v3.0.0 — reemplaza AUTH_DB_PATH + STORAGE_FILE_PATH)
       - DB_PATH=/app/data/analyzer.db
+      # Zona horaria del contenedor (Issue #8 — sincronizar con host)
+      - TZ=${TZ:-America/Mexico_City}
     volumes:
       # Mapear código fuente para desarrollo
       - ./app:/app/app
