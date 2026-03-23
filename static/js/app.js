@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tower Scan Automation - Frontend JavaScript
  * Maneja la interfaz web, comunicación con API y visualización de datos
  */
@@ -6,10 +6,11 @@
 // Estado de la aplicación
 const appState = {
     currentScanId: null,
-    pollInterval: null,
+    pollTimeout: null,       // Handle del setTimeout activo (reemplaza pollInterval)
     scanResults: null,
     chartInstance: null,
-    lastLogCount: 0
+    lastLogCount: 0,
+    lastProgress: 0          // Último progreso conocido (para recovery tras error de red)
 };
 
 // Referencias a elementos DOM
@@ -311,19 +312,50 @@ async function startScan() {
     }
 }
 
-function startPolling() {
-    if (appState.pollInterval) clearInterval(appState.pollInterval);
-    appState.pollInterval = setInterval(checkStatus, 2000);
+// ── Adaptive Polling ─────────────────────────────────────────────────────────
+// Intervalo adaptativo: 2s cuando progress < 40%, 5s cuando progress >= 40%.
+// Implementado con setTimeout recursivo en lugar de setInterval fijo.
+
+/**
+ * Detiene el ciclo de polling cancellando cualquier timeout pendiente.
+ */
+function stopPolling() {
+    if (appState.pollTimeout) {
+        clearTimeout(appState.pollTimeout);
+        appState.pollTimeout = null;
+    }
 }
 
-async function checkStatus() {
+/**
+ * Programa el próximo poll con delay adaptativo según el progreso actual.
+ * @param {number} progress - Progreso actual del scan (0-100)
+ */
+function scheduleNextPoll(progress) {
+    const delay = progress >= 40 ? 5000 : 2000;
+    appState.pollTimeout = setTimeout(pollOnce, delay);
+}
+
+/**
+ * Arranca el ciclo de polling. Cancela cualquier ciclo previo antes de iniciar.
+ */
+function startPolling() {
+    stopPolling();
+    scheduleNextPoll(0); // Primera consulta siempre rápida (2s)
+}
+
+/**
+ * Ejecuta una sola consulta de estado y reprograma el siguiente poll.
+ * Se llama recursivamente via setTimeout (no setInterval).
+ */
+async function pollOnce() {
     if (!appState.currentScanId) return;
 
     try {
         const res = await authFetch(`/api/status/${appState.currentScanId}`);
-        if (!res) return; // Redirected to login
+        if (!res) return; // Redirigido a login
         const status = await res.json();
 
+        appState.lastProgress = status.progress || 0;
         updateProgress(status.progress);
         updateStatusBadge(status.status);
 
@@ -332,7 +364,6 @@ async function checkStatus() {
             if (status.logs.length > appState.lastLogCount) {
                 const newLogs = status.logs.slice(appState.lastLogCount);
                 newLogs.forEach(log => {
-                    // Usar el tipo que viene del backend o default a info
                     addLogEntry(log.msg, log.type || 'info');
                 });
                 appState.lastLogCount = status.logs.length;
@@ -340,19 +371,27 @@ async function checkStatus() {
         }
 
         if (status.status === 'completed') {
-            clearInterval(appState.pollInterval);
+            stopPolling();
             addLogEntry('Escaneo finalizado correctamente.', 'success');
             displayResults(status.results);
         } else if (status.status === 'failed') {
-            clearInterval(appState.pollInterval);
+            stopPolling();
             addLogEntry(`Falló el escaneo: ${status.error}`, 'error');
             elements.startScanBtn.disabled = false;
             elements.startScanBtn.innerHTML = '<i class="bi bi-broadcast"></i> Iniciar Tower Scan';
+        } else {
+            // Scan en curso: reprogramar con delay adaptativo
+            scheduleNextPoll(status.progress || 0);
         }
     } catch (e) {
         console.error('Polling error:', e);
+        // Error de red transitorio: retomar el ciclo con el último progreso conocido
+        scheduleNextPoll(appState.lastProgress);
     }
 }
+
+// Alias para compatibilidad: checkStatus ahora dispara un ciclo manual
+function checkStatus() { pollOnce(); }
 
 // ==================== VISUALIZACIÓN DE RESULTADOS ====================
 
@@ -774,6 +813,7 @@ function resetInterface() {
 }
 
 function clearForm() {
+    stopPolling(); // Cancela cualquier timeout de polling pendiente
     elements.apIPs.value = '';
     elements.smIPs.value = '';
     if (elements.ticketId) elements.ticketId.value = '';

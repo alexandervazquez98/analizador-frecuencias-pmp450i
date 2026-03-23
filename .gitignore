@@ -62,6 +62,7 @@ data/
 
 # SDD artifacts (internal planning, not shipped)
 .artifacts/
+.atl/
 
 # Backup files
 *.bak
