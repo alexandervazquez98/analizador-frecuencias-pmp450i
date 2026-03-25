@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tower Scan Automation - Frontend JavaScript
  * Maneja la interfaz web, comunicación con API y visualización de datos
  */
@@ -596,6 +596,10 @@ function renderAPCard(ip, analysis) {
     const isCross = analysis.mode === 'AP_SM_CROSS';
     let bestFreqInfo = '';
     let qualityBadge = '';
+    // Tarea 4.1 + 4.4: botón de apply y badge de frecuencia recomendada
+    let applyBtn = '';
+    let freqBadge = '';
+    const isViewer = (window.userRole === 'viewer');
 
     // Determinar mejor frecuencia y calidad
     if (isCross && analysis.best_combined_frequency) {
@@ -603,21 +607,39 @@ function renderAPCard(ip, analysis) {
         const color = best.is_viable ? 'success' : 'danger';
         qualityBadge = `<span class="badge bg-${color}">${best.is_viable ? 'VIABLE' : 'NO VIABLE'}</span>`;
 
+        // Tarea 4.4: badge de frecuencia recomendada junto al quality badge
+        freqBadge = `<span class="badge bg-secondary ms-2"><i class="bi bi-broadcast"></i> ${best.frequency} MHz</span>`;
+
         bestFreqInfo = `
             <div class="alert alert-${color} mb-2">
                 <strong><i class="bi bi-star-fill"></i> Mejor Frecuencia: ${best.frequency} MHz</strong><br>
                 <small>Score Combinado: ${best.combined_score} | Ruido Promedio SMs: ${best.sm_avg_noise.toFixed(1)} dBm</small>
             </div>
         `;
+
+        // Tarea 4.1: botón de apply — visible solo si no es viewer
+        if (!isViewer) {
+            const scanId = appState.currentScanId || (appState.scanResults && appState.scanResults.scan_id);
+            if (scanId) {
+                applyBtn = `
+                    <button type="button" class="btn btn-warning btn-sm ms-2"
+                        id="applyBtn-${ip.replace(/\./g, '-')}"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best.frequency}, ${best.combined_score}, ${best.is_viable})"
+                        title="Aplicar frecuencia óptima vía SNMP">
+                        <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
+                    </button>`;
+            }
+        }
     } else if (analysis.best_frequency) {
         const best = analysis.best_frequency;
-        // Mapear calidad de texto a colores bootstap
+        // Mapear calidad de texto a colores bootstrap
         const qColorMap = {
             'EXCELENTE': 'success', 'BUENO': 'primary', 'ACEPTABLE': 'info',
             'MARGINAL': 'warning', 'CRÍTICO': 'danger'
         };
         const qColor = qColorMap[best.quality_level] || 'secondary';
         qualityBadge = `<span class="badge bg-${qColor}">${best.quality_level || 'N/A'}</span>`;
+        freqBadge = `<span class="badge bg-secondary ms-2"><i class="bi bi-broadcast"></i> ${best['Frecuencia Central (MHz)']} MHz</span>`;
 
         bestFreqInfo = `
             <div class="alert alert-${qColor} mb-2 text-dark">
@@ -630,9 +652,7 @@ function renderAPCard(ip, analysis) {
     }
 
     // Botón de Espectro (solo si hay datos)
-    // spectrum_data es un objeto {ap: [], sms: {}}, no un array, no tiene .length
     const hasSpectrumData = analysis.spectrum_data && (analysis.spectrum_data.ap || analysis.spectrum_data.sms);
-    // Usamos onclick inline o data attributes, voy a usar data attributes para el listener global
     const spectrumBtn = hasSpectrumData
         ? `<button type="button" class="btn btn-outline-info btn-sm view-spectrum-btn" data-ip="${ip}"><i class="bi bi-graph-up"></i> Ver Espectro</button>`
         : '<span class="text-muted small">Sin datos de espectro</span>';
@@ -641,7 +661,11 @@ function renderAPCard(ip, analysis) {
         <div class="card mb-3 border-secondary bg-dark text-light">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-router"></i> AP ${ip}</h5>
-                <div>${qualityBadge}</div>
+                <div class="d-flex align-items-center flex-wrap gap-1">
+                    ${qualityBadge}
+                    ${freqBadge}
+                    ${applyBtn}
+                </div>
             </div>
             <div class="card-body">
                 ${bestFreqInfo}
@@ -1096,4 +1120,186 @@ function escapeAttr(str) {
 //   static/js/users.js
 //   static/js/history.js
 // Those modules depend on authFetch, showPanelAlert, escapeHtml, escapeAttr defined above.
+
+// ==================== APPLY FREQUENCY MODAL (Tarea 4.2 + 4.3) ====================
+
+/**
+ * Estado interno del modal de aplicación de frecuencia.
+ */
+const _applyModal = {
+    scanId: null,
+    apIp: null,
+    freqMhz: null,
+    isViable: null,
+    score: null,
+    submitting: false,
+};
+
+/**
+ * Inyecta el modal de apply-frequency en el DOM si no existe todavía.
+ */
+function _ensureApplyModal() {
+    if (document.getElementById('applyFreqModal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'applyFreqModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);overflow:auto;';
+    modal.innerHTML = `
+        <div style="margin:6% auto;max-width:480px;background:#1e1e2e;border:1px solid #444;border-radius:10px;padding:1.5rem;color:#e0e0e0;box-shadow:0 8px 32px #0008;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                <h5 style="margin:0;"><i class="bi bi-lightning-charge-fill" style="color:#ffc107;"></i> Aplicar Frecuencia Optima</h5>
+                <button onclick="closeApplyModal()" style="background:none;border:none;color:#aaa;font-size:1.4rem;cursor:pointer;">&times;</button>
+            </div>
+            <div id="applyModalBadges" style="margin-bottom:1rem;display:flex;gap:.5rem;flex-wrap:wrap;"></div>
+            <div style="margin-bottom:.75rem;">
+                <label for="applyInputFreq" style="font-size:.85rem;color:#aaa;">Frecuencia (MHz)</label>
+                <input type="number" id="applyInputFreq" step="0.5" min="4900" max="6000"
+                    style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:1rem;">
+            </div>
+            <div style="margin-bottom:.75rem;">
+                <label for="applyInputTower" style="font-size:.85rem;color:#aaa;">Tower ID <span style="color:#777;">(opcional)</span></label>
+                <input type="text" id="applyInputTower" placeholder="Ej: TORRE-01"
+                    style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:.9rem;">
+            </div>
+            <div id="applyForceWrapper" style="display:none;margin-bottom:.75rem;">
+                <label style="font-size:.85rem;cursor:pointer;">
+                    <input type="checkbox" id="applyForceCheck" style="margin-right:.4rem;">
+                    <span style="color:#f66;">Forzar apply (ignorar viabilidad)</span>
+                    <small style="display:block;color:#888;margin-top:.2rem;">Solo disponible para administradores.</small>
+                </label>
+            </div>
+            <div id="applyInfoBox" style="font-size:.82rem;color:#aaa;margin-bottom:1rem;line-height:1.5;"></div>
+            <div id="applyResultArea" style="display:none;margin-bottom:1rem;padding:.75rem;border-radius:6px;font-size:.87rem;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:.5rem;">
+                <button onclick="closeApplyModal()"
+                    style="padding:.4rem 1rem;background:#444;border:none;border-radius:6px;color:#ccc;cursor:pointer;">
+                    Cerrar
+                </button>
+                <button id="applySubmitBtn" onclick="submitApplyFrequency()"
+                    style="padding:.4rem 1.2rem;background:#ffc107;border:none;border-radius:6px;color:#000;font-weight:600;cursor:pointer;">
+                    <i class="bi bi-lightning-charge-fill"></i> Aplicar
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeApplyModal(); });
+}
+
+/**
+ * Tarea 4.2: Abre el modal de apply-frequency pre-llenado.
+ */
+function openApplyModal(scanId, apIp, freqMhz, score, isViable) {
+    _ensureApplyModal();
+    _applyModal.scanId = scanId;
+    _applyModal.apIp = apIp;
+    _applyModal.freqMhz = freqMhz;
+    _applyModal.isViable = isViable;
+    _applyModal.score = score;
+    _applyModal.submitting = false;
+
+    document.getElementById('applyInputFreq').value = freqMhz;
+    document.getElementById('applyInputTower').value = '';
+    const forceCheck = document.getElementById('applyForceCheck');
+    if (forceCheck) forceCheck.checked = false;
+
+    const viableColor = isViable ? '#198754' : '#dc3545';
+    const viableLabel = isViable ? 'VIABLE' : 'NO VIABLE';
+    document.getElementById('applyModalBadges').innerHTML = `
+        <span style="padding:.2rem .6rem;background:#2a2a3e;border:1px solid #555;border-radius:4px;font-size:.78rem;">
+            <i class="bi bi-router"></i> ${escapeHtml(apIp)}
+        </span>
+        <span style="padding:.2rem .6rem;background:${viableColor}22;border:1px solid ${viableColor};border-radius:4px;font-size:.78rem;color:${viableColor};">
+            ${viableLabel}
+        </span>
+        <span style="padding:.2rem .6rem;background:#2a2a3e;border:1px solid #555;border-radius:4px;font-size:.78rem;">
+            Score: <strong>${Number(score).toFixed(2)}</strong>
+        </span>`;
+
+    document.getElementById('applyInfoBox').innerHTML = isViable
+        ? `<i class="bi bi-check-circle-fill" style="color:#198754;"></i> Frecuencia <strong>${freqMhz} MHz</strong> viable. Se aplicara primero a los SMs y luego al AP.`
+        : `<i class="bi bi-exclamation-triangle-fill" style="color:#dc3545;"></i> Frecuencia <strong>${freqMhz} MHz</strong> <strong>no viable</strong>. Requiere forzar (solo admin).`;
+
+    const forceWrapper = document.getElementById('applyForceWrapper');
+    if (forceWrapper) forceWrapper.style.display = (window.userRole === 'admin') ? '' : 'none';
+
+    const resultArea = document.getElementById('applyResultArea');
+    resultArea.style.display = 'none';
+    resultArea.textContent = '';
+
+    const submitBtn = document.getElementById('applySubmitBtn');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> Aplicar'; }
+
+    document.getElementById('applyFreqModal').style.display = 'block';
+}
+
+function closeApplyModal() {
+    const modal = document.getElementById('applyFreqModal');
+    if (modal) modal.style.display = 'none';
+    _applyModal.submitting = false;
+}
+
+/**
+ * Tarea 4.3: Envía POST /api/apply-frequency y muestra resultado inline.
+ */
+async function submitApplyFrequency() {
+    if (_applyModal.submitting) return;
+
+    const freqMhz = parseFloat(document.getElementById('applyInputFreq').value);
+    if (!freqMhz || freqMhz < 4900 || freqMhz > 6000) {
+        showApplyResult('danger', 'Frecuencia invalida. Debe estar entre 4900 y 6000 MHz.');
+        return;
+    }
+
+    const towerId = (document.getElementById('applyInputTower').value || '').trim() || _applyModal.apIp;
+    const forceCheck = document.getElementById('applyForceCheck');
+    const force = !!(forceCheck && forceCheck.checked);
+
+    _applyModal.submitting = true;
+    const submitBtn = document.getElementById('applySubmitBtn');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Aplicando...'; }
+    showApplyResult('info', '<span class="spinner-border spinner-border-sm me-2"></span> Enviando comandos SNMP...');
+
+    try {
+        const res = await authFetch('/api/apply-frequency', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scan_id: _applyModal.scanId, freq_mhz: freqMhz, tower_id: towerId, force }),
+        });
+        if (!res) { _applyModal.submitting = false; return; }
+
+        const data = await res.json();
+        if (!res.ok) {
+            showApplyResult('danger', `<i class="bi bi-x-circle-fill"></i> <strong>Error:</strong> ${escapeHtml(data.error || data.message || 'Error HTTP ' + res.status)}`);
+        } else {
+            const state = data.state || 'unknown';
+            const applyId = data.apply_id;
+            const freqResult = data.freq_khz ? (data.freq_khz / 1000).toFixed(1) : freqMhz;
+            const smErrors = (data.errors || []).filter(e => e.startsWith('SM'));
+            const apError = (data.errors || []).find(e => e.startsWith('AP'));
+
+            if (state === 'completed') {
+                let detail = `Frecuencia <strong>${freqResult} MHz</strong> aplicada correctamente`;
+                if (smErrors.length > 0) detail += `<br><small style="color:#ffc107;"><i class="bi bi-exclamation-triangle"></i> ${smErrors.length} SM(s) con errores — AP OK</small>`;
+                showApplyResult('success', `<i class="bi bi-check-circle-fill"></i> <strong>Completado</strong> (apply_id=${applyId})<br>${detail}`);
+            } else {
+                const errMsg = apError || (data.errors || []).join('; ') || 'Error desconocido';
+                showApplyResult('danger', `<i class="bi bi-x-circle-fill"></i> <strong>Fallido</strong> (apply_id=${applyId}, state=${state})<br><small>${escapeHtml(errMsg)}</small>`);
+            }
+        }
+    } catch (err) {
+        showApplyResult('danger', `<i class="bi bi-x-circle-fill"></i> Error de red: ${escapeHtml(err.message)}`);
+    } finally {
+        _applyModal.submitting = false;
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> Aplicar'; }
+    }
+}
+
+function showApplyResult(type, html) {
+    const area = document.getElementById('applyResultArea');
+    if (!area) return;
+    const c = { success: { bg:'#0f3d1f', border:'#198754', color:'#75b798' }, danger: { bg:'#3d0f0f', border:'#dc3545', color:'#ea868f' }, info: { bg:'#0d2137', border:'#0dcaf0', color:'#6edff6' }, warning: { bg:'#3d2e00', border:'#ffc107', color:'#ffda6a' } }[type] || { bg:'#0d2137', border:'#0dcaf0', color:'#6edff6' };
+    area.style.cssText = `display:block;padding:.75rem;border-radius:6px;font-size:.87rem;background:${c.bg};border:1px solid ${c.border};color:${c.color};`;
+    area.innerHTML = html;
+}
 

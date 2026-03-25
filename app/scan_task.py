@@ -17,6 +17,7 @@ from app.tower_scan import TowerScanner
 from app.frequency_analyzer import FrequencyAnalyzer, analyze_ap
 from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData
 from app.audit_manager import AuditManager
+from app.freq_apply_manager import FrequencyApplyManager
 
 logger = logging.getLogger(__name__)
 
@@ -572,6 +573,14 @@ class ScanTask:
                         "[%s] storage complete_scan failed: %s", self.scan_id, exc
                     )
 
+            # ── Fase 3: Auto-apply hook ───────────────────────────────────
+            # Tarea 3.1: leer auto_apply_enabled del config (default False)
+            auto_apply_enabled = bool(self.config.get("auto_apply_enabled", False))
+
+            # Tarea 3.2: disparar apply si aplica
+            if auto_apply_enabled and self.storage_manager is not None:
+                self._run_auto_apply(analysis_results)
+
             # Cerrar auditoria con resultado exitoso
             if self.audit_manager:
                 result_summary = (
@@ -678,3 +687,116 @@ class ScanTask:
     def run_in_thread(self):
         """Execute in a separate thread using asyncio.run()."""
         asyncio.run(self.execute())
+
+    def _run_auto_apply(self, analysis_results: dict) -> None:
+        """Auto-apply optimal frequency for each AP that has a viable recommendation.
+
+        Called after complete_scan() persists the scan to DB. Iterates analysis_results
+        and triggers FrequencyApplyManager.run_apply() for each AP where:
+          - best_combined_frequency is present
+          - is_viable == True
+          - combined_score >= 0.65
+
+        Args:
+            analysis_results: Dict mapping AP IP → analysis result dict.
+
+        Spec: change-006 tasks Phase 3 (3.1–3.3).
+        Design: change-006 design — Auto-apply hook.
+
+        Safety contract:
+            This method NEVER raises. Any exception is caught, logged, and discarded.
+            A failed auto-apply does NOT change the scan's status (it remains 'completed').
+        """
+        # tower_id is optional — taken from scan config if the scan was started
+        # from a tower context. Defaults to None when scan is standalone.
+        tower_id = self.config.get("tower_id") or None
+
+        # Build a minimal TowerScanner for SNMP SET operations.
+        # Use empty ap_ips list — FrequencyApplyManager reads AP IP from the scan record.
+        try:
+            scanner = TowerScanner(
+                ap_ips=[],
+                snmp_communities=self.snmp_communities,
+                log_callback=self.log,
+            )
+        except Exception as exc:
+            self.log(
+                f"[AUTO-APPLY] No se pudo instanciar TowerScanner: {exc}", "error"
+            )
+            logger.error("[%s] auto-apply: TowerScanner init failed: %s", self.scan_id, exc)
+            return
+
+        apply_manager = FrequencyApplyManager(
+            db_manager=self.storage_manager.db,
+            tower_scanner=scanner,
+        )
+
+        # Tarea 3.2: iterate APs, fire apply for each viable recommendation.
+        for ap_ip, ap_result in analysis_results.items():
+            if not isinstance(ap_result, dict):
+                continue
+
+            best = ap_result.get("best_combined_frequency")
+            if not best:
+                continue  # AP_ONLY mode or cross-analysis did not produce best
+
+            is_viable = best.get("is_viable", False)
+            combined_score = best.get("combined_score", 0.0)
+            freq_mhz = best.get("frequency")
+
+            if not is_viable or combined_score < 0.65 or not freq_mhz:
+                self.log(
+                    f"[AUTO-APPLY] AP {ap_ip}: saltado "
+                    f"(viable={is_viable}, score={combined_score:.2f}, freq={freq_mhz})",
+                    "info",
+                )
+                continue
+
+            # Tarea 3.3: never raise from auto-apply.
+            try:
+                self.log(
+                    f"[AUTO-APPLY] AP {ap_ip}: aplicando {freq_mhz} MHz "
+                    f"(score={combined_score:.2f})...",
+                    "info",
+                )
+                result = apply_manager.run_apply(
+                    scan_id=self.scan_id,
+                    freq_mhz=float(freq_mhz),
+                    tower_id=tower_id or ap_ip,  # fallback: use AP IP as tower_id
+                    applied_by="auto",
+                    force=False,  # auto-apply never bypasses viability gate
+                )
+                state = result.get("state", "unknown")
+                apply_id = result.get("apply_id")
+                if result.get("success"):
+                    self.log(
+                        f"[AUTO-APPLY] AP {ap_ip}: completado "
+                        f"(apply_id={apply_id}, state={state})",
+                        "success",
+                    )
+                    logger.info(
+                        "[%s] auto-apply: AP %s → %s MHz OK (apply_id=%s)",
+                        self.scan_id, ap_ip, freq_mhz, apply_id,
+                    )
+                else:
+                    errors = "; ".join(result.get("errors") or [])
+                    self.log(
+                        f"[AUTO-APPLY] AP {ap_ip}: fallido "
+                        f"(apply_id={apply_id}, state={state}, errors={errors})",
+                        "warning",
+                    )
+                    logger.warning(
+                        "[%s] auto-apply: AP %s failed (apply_id=%s): %s",
+                        self.scan_id, ap_ip, apply_id, errors,
+                    )
+
+            except Exception as exc:
+                # Tarea 3.3: auto-apply failure must NOT fail the scan.
+                self.log(
+                    f"[AUTO-APPLY] AP {ap_ip}: excepcion inesperada — {exc}", "error"
+                )
+                logger.error(
+                    "[%s] auto-apply: AP %s unexpected error: %s",
+                    self.scan_id, ap_ip, exc,
+                    exc_info=True,
+                )

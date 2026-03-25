@@ -222,6 +222,7 @@ async function openScanDetail(scanId) {
     }
 
     await refreshScanVerifications(scanId);
+    await renderApplyHistorySection(scanId);
 }
 
 /**
@@ -321,6 +322,98 @@ async function submitVerificationForm() {
         return;
     }
 
-    showPanelAlert('historyAlert', 'Verificación registrada correctamente.', 'success');
+    showPanelAlert('historyAlert', 'Verificaci\u00f3n registrada correctamente.', 'success');
     await refreshScanVerifications(_selectedScanId);
+}
+
+// ==================== HISTORIAL DE APPLIES (Tarea 4.5) ====================
+
+/**
+ * Fetches apply history from GET /api/apply-history/<tower_id>.
+ * @param {string} towerId
+ * @returns {Promise<Array>}
+ */
+async function loadApplyHistory(towerId) {
+    const res = await authFetch(`/api/apply-history/${encodeURIComponent(towerId)}`);
+    if (!res || !res.ok) return [];
+    const data = await res.json();
+    return data.applies || [];
+}
+
+/**
+ * Tarea 4.5: Renderiza la seccion de historial de applies para un scan.
+ * @param {string} scanId
+ */
+async function renderApplyHistorySection(scanId) {
+    let container = document.getElementById('applyHistoryContainer');
+    if (!container) {
+        const panel = document.getElementById('scanDetailPanel');
+        if (!panel) return;
+        container = document.createElement('div');
+        container.id = 'applyHistoryContainer';
+        container.style.marginTop = '1rem';
+        panel.appendChild(container);
+    }
+
+    container.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Cargando historial de aplicaciones...</div>`;
+
+    try {
+        const statusRes = await authFetch(`/api/status/${encodeURIComponent(scanId)}`);
+        const statusData = statusRes && statusRes.ok ? await statusRes.json() : null;
+
+        let towerId = null;
+        if (statusData && statusData.results) {
+            const cfg = statusData.results.config;
+            if (cfg && cfg.tower_id) towerId = cfg.tower_id;
+            if (!towerId && statusData.results.analysis_results) {
+                towerId = Object.keys(statusData.results.analysis_results)[0] || null;
+            }
+        }
+
+        if (!towerId) {
+            container.innerHTML = `<p class="text-muted small"><i class="bi bi-info-circle"></i> Sin tower_id \u2014 no hay historial de applies.</p>`;
+            return;
+        }
+
+        const applies = await loadApplyHistory(towerId);
+        if (applies.length === 0) {
+            container.innerHTML = `
+                <h6 class="text-warning mt-2"><i class="bi bi-lightning-charge"></i> Historial de Aplicaciones</h6>
+                <p class="text-muted small"><i class="bi bi-info-circle"></i> Sin aplicaciones registradas para <code>${escapeHtml(towerId)}</code>.</p>`;
+            return;
+        }
+
+        const stateColor = { completed: 'success', failed: 'danger', sms_applied: 'warning', pending: 'secondary' };
+        const rows = applies.map(a => {
+            const freqMhz = a.freq_khz ? (a.freq_khz / 1000).toFixed(1) : '\u2014';
+            const prevMhz = a.prev_freq_khz ? (a.prev_freq_khz / 1000).toFixed(1) : '\u2014';
+            const date = a.created_at ? new Date(a.created_at).toLocaleString() : 'N/A';
+            const badgeColor = stateColor[a.state] || 'secondary';
+            return `
+                <tr>
+                    <td class="small">${date}</td>
+                    <td><strong>${escapeHtml(String(freqMhz))} MHz</strong></td>
+                    <td class="text-muted">${escapeHtml(String(prevMhz))} MHz</td>
+                    <td><span class="badge bg-${badgeColor}">${escapeHtml(a.state || '\u2014')}</span></td>
+                    <td class="small">${escapeHtml(a.applied_by_username || '\u2014')}</td>
+                    <td class="text-danger small">${a.error ? escapeHtml(a.error.substring(0, 60)) : '\u2014'}</td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <h6 class="text-warning mt-2"><i class="bi bi-lightning-charge"></i> Historial de Aplicaciones (${applies.length})</h6>
+            <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-0" style="font-size:.82rem;">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th><th>Frec. Aplicada</th><th>Frec. Anterior</th>
+                            <th>Estado</th><th>Usuario</th><th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        container.innerHTML = `<p class="text-danger small">Error cargando historial: ${escapeHtml(err.message)}</p>`;
+    }
 }
