@@ -839,17 +839,19 @@ class TowerScanner:
     def set_channel_width(self, ip: str, width_mhz: int) -> Tuple[bool, str]:
         """SET channel bandwidth on AP via SNMP.
 
-        OID priority (according to Cambium MIB documentation):
-          1. .1.3.6.1.4.1.161.19.3.3.2.91.0  — bandwidth.0 (Integer, RECOMMENDED for software)
+        OID priority (confirmed by Cambium MIB field testing):
+          1. .1.3.6.1.4.1.161.19.3.3.2.83.0  — channelBandwidth.0 (OctetString, WRITABLE)
+             Format: "5.0 MHz", "10.0 MHz", "20.0 MHz", "30.0 MHz", "40.0 MHz"
+             This is the only OID with a confirmed snmpset example in Cambium docs.
+          2. .1.3.6.1.4.1.161.19.3.3.2.91.0  — bandwidth.0 (Integer, fallback)
+             May be read-only on fw24.x — silently accepts writes but doesn't apply.
              Integer mapping: 1=5MHz, 2=10MHz, 3=15MHz, 4=20MHz, 5=30MHz, 6=40MHz
-          2. .1.3.6.1.4.1.161.19.3.3.2.83.0  — channelBandwidth.0 (OctetString fallback)
-             String format: "5.0 MHz", "10.0 MHz", "20.0 MHz", etc.
 
-        NOTE: OID 221.0 is SPECTRUM_ACTION_OID — do NOT use it for channel bandwidth.
+        NOTE: OID 221.0 is SPECTRUM_ACTION_OID — do NOT use for channel bandwidth.
 
         Args:
             ip:        AP IP address.
-            width_mhz: Desired channel width in MHz (5, 10, 15, 20, 30 or 40).
+            width_mhz: Channel width in MHz (5, 10, 15, 20, 30 or 40).
 
         Returns:
             Tuple (success: bool, message: str).
@@ -859,19 +861,36 @@ class TowerScanner:
         if bw_int is None:
             return False, f"Ancho de canal {width_mhz} MHz no soportado. Válidos: {list(BW_INT_MAP.keys())}"
 
-        # OID 1: Integer (recomendado para software)
-        CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
-        # OID 2: OctetString fallback — valor debe ser "X.0 MHz"
+        # OID 1: OctetString — único con SET confirmado por Cambium
         CHANNEL_BW_OID_STR = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
-        bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz", "5.0 MHz", etc.
+        # OID 2: Integer fallback — puede ser read-only en fw24.x
+        CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
+        bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz", "40.0 MHz", etc.
 
         self._log(
             f"[APPLY] {ip}: SET channelBandwidth = {width_mhz} MHz "
-            f"(int={bw_int}, str='{bw_str}')",
+            f"(str='{bw_str}', int={bw_int})",
             "info",
         )
 
-        # Try 1: Integer OID .91.0 (recomendado)
+        # Try 1: OctetString OID .83.0 — valor "X.0 MHz" (PRIMARIO, confirmado escribible)
+        success, msg = self._snmp_set_string(
+            ip=ip,
+            oid=CHANNEL_BW_OID_STR,
+            value=bw_str,
+        )
+        if success:
+            self._log(
+                f"[APPLY] {ip}: SET channelBandwidth='{bw_str}' OK (OID .83.0 OctetString)",
+                "info",
+            )
+            return True, "OK"
+        self._log(
+            f"[APPLY] {ip}: OID .83.0 falló ({msg}) — probando Integer .91.0",
+            "warning",
+        )
+
+        # Try 2: Integer OID .91.0 (fallback — puede ser read-only en algunos fw)
         try:
             iterator = setCmd(
                 SnmpEngine(),
@@ -882,26 +901,19 @@ class TowerScanner:
             )
             errInd, errStat, _, _ = next(iterator)
             if not errInd and not errStat:
-                self._log(f"[APPLY] {ip}: SET channelBandwidth={width_mhz}MHz OK (OID .91.0 int={bw_int})", "info")
-                return True, "OK"
-            self._log(
-                f"[APPLY] {ip}: OID .91.0 falló ({errInd or errStat}) — probando OctetString .83.0",
-                "warning",
-            )
-        except Exception as e:
-            self._log(f"[APPLY] {ip}: Excepción OID .91.0 — {e} — probando OctetString .83.0", "warning")
-
-        # Try 2: OctetString OID .83.0 — valor "X.0 MHz"
-        success, msg = self._snmp_set_string(
-            ip=ip,
-            oid=CHANNEL_BW_OID_STR,
-            value=bw_str,
-        )
-        if success:
-            self._log(f"[APPLY] {ip}: SET channelBandwidth='{bw_str}' OK (OID .83.0 string)", "info")
-        else:
+                self._log(
+                    f"[APPLY] {ip}: SET channelBandwidth={width_mhz}MHz OK (OID .91.0 int={bw_int}) "
+                    f"[WARNING: this OID may be read-only on fw24.x]",
+                    "warning",
+                )
+                return True, "OK (via .91.0 — verify on device)"
+            msg = f"SNMP Error: {errInd or errStat.prettyPrint()}"
             self._log(f"[APPLY] {ip}: FALLÓ ambos OIDs de channelBandwidth — {msg}", "error")
-        return success, msg
+            return False, msg
+        except Exception as e:
+            msg = str(e)
+            self._log(f"[APPLY] {ip}: Excepción OID .91.0 — {msg}", "error")
+            return False, msg
 
     def set_contention_slots(self, ip: str) -> Tuple[bool, str]:
         """SET numCtlSlotsHW = 4 (hardcoded, OBLIGATORIO).
