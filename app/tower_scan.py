@@ -8,8 +8,10 @@ import time
 import os
 from typing import List, Dict, Tuple
 from pysnmp.hlapi import *
-from pysnmp.proto.rfc1902 import Integer32
+from pysnmp.proto.rfc1902 import Integer32, OctetString
 import logging
+
+from app.freq_utils import format_scan_list
 
 # Logger del módulo (configuración centralizada en app/__init__.py)
 logger = logging.getLogger(__name__)
@@ -23,6 +25,10 @@ class TowerScanner:
     # OID para control de Spectrum Analysis (PMP 450i Legacy/V1)
     SPECTRUM_ACTION_OID = "1.3.6.1.4.1.161.19.3.3.2.221.0"
     SPECTRUM_DURATION_OID = "1.3.6.1.4.1.161.19.3.3.2.222.0"
+
+    # OIDs para aplicación de frecuencia (change-006)
+    RF_FREQ_CARRIER_OID = "1.3.6.1.4.1.161.19.3.1.1.2.0"  # AP — Integer32, kHz
+    RF_SCAN_LIST_OID = "1.3.6.1.4.1.161.19.3.2.1.1.0"  # SM — OctetString, kHz separado por coma
 
     # Valores de control
     SET_FULL_SCAN = 8
@@ -52,6 +58,7 @@ class TowerScanner:
         snmp_communities: List[str] = None,
         sm_ips: List[str] = None,
         log_callback=None,
+        write_community: str = None,
     ):
         """
         Inicializar el scanner
@@ -61,6 +68,9 @@ class TowerScanner:
             snmp_communities: Lista de comunidades SNMP a probar (default: ['Canopy'])
             sm_ips: Lista opcional de IPs de SMs para análisis cruzado
             log_callback: Función(msg, level) para logs externos
+            write_community: Comunidad SNMP de escritura para operaciones SET (apply).
+                             Si no se provee, se usa SNMP_WRITE_COMMUNITY de entorno,
+                             o la primera entrada de snmp_communities como fallback.
         """
         self.ap_ips = ap_ips
         self.sm_ips = sm_ips or []
@@ -77,6 +87,13 @@ class TowerScanner:
             else:
                 raw = os.environ.get("SNMP_COMMUNITIES", "Canopy")
                 self.snmp_communities = [c.strip() for c in raw.split(",") if c.strip()]
+
+        # Comunidad de escritura para operaciones SET (apply de frecuencia)
+        if write_community:
+            self.write_community = write_community
+        else:
+            env_write = os.environ.get("SNMP_WRITE_COMMUNITY", "").strip()
+            self.write_community = env_write if env_write else self.snmp_communities[0]
 
         self.scan_results = {}
         self.log_callback = log_callback
@@ -661,6 +678,163 @@ class TowerScanner:
         """Helper genérico para GET OID usando la comunidad mapeada"""
         community = self._get_community(ip)
         return self._snmp_get_oid_raw(ip, oid, community)
+
+    # =========================================================================
+    # MÉTODOS DE APPLY DE FRECUENCIA (change-006)
+    # =========================================================================
+
+    def _snmp_set_string(
+        self,
+        ip: str,
+        oid: str,
+        value: str,
+        community: str = None,
+        timeout: int = None,
+        retries: int = None,
+    ) -> Tuple[bool, str]:
+        """
+        Enviar comando SNMP SET con valor OctetString a un dispositivo.
+
+        Equivalente a _snmp_set() pero para tipos OctetString (e.g. rfScanList).
+        Usa self.write_community por defecto (no la comunidad de lectura).
+
+        Args:
+            ip: Dirección IP del dispositivo.
+            oid: OID completo a setear.
+            value: Valor string a escribir (se codifica como OctetString).
+            community: Comunidad SNMP de escritura. Si es None, usa self.write_community.
+            timeout: Timeout en segundos. Si es None, usa SNMP_TIMEOUT.
+            retries: Reintentos. Si es None, usa SNMP_RETRIES.
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        timeout = timeout or self.SNMP_TIMEOUT
+        retries = retries or self.SNMP_RETRIES
+        comm = community or self.write_community
+
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(comm, mpModel=1),  # SNMPv2c
+                UdpTransportTarget((ip, 161), timeout=timeout, retries=retries),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid), OctetString(value)),
+            )
+
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+
+            if errorIndication:
+                return False, f"SNMP Error: {errorIndication}"
+            elif errorStatus:
+                status_str = errorStatus.prettyPrint()
+                if "notWritable" in status_str:
+                    return (
+                        False,
+                        f"Error de Permisos: La comunidad '{comm}' es de SOLO LECTURA.",
+                    )
+                return False, f"SNMP Error: {status_str}"
+            else:
+                logger.debug(f"[OK] {ip}: SET OctetString oid={oid} exitoso")
+                return True, "OK"
+
+        except Exception as e:
+            logger.error(f"[ERROR] {ip}: Excepción SNMP SET string - {str(e)}")
+            return False, str(e)
+
+    def set_frequency(self, ip: str, freq_khz: int) -> Tuple[bool, str]:
+        """
+        Aplicar frecuencia portadora al AP via SNMP SET (rfFreqCarrier).
+
+        OID: 1.3.6.1.4.1.161.19.3.1.1.2.0 (Integer32, valor en kHz).
+        Usa la comunidad de escritura (self.write_community).
+
+        Args:
+            ip: Dirección IP del AP.
+            freq_khz: Frecuencia objetivo en kHz. Ejemplo: 3554000.
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        self._log(
+            f"[APPLY] {ip}: SET rfFreqCarrier = {freq_khz} kHz (OID {self.RF_FREQ_CARRIER_OID})",
+            "info",
+        )
+
+        # _snmp_set usa self._get_community(ip) — necesitamos la write_community.
+        # La seteamos como comunidad de esta IP temporalmente vía override directo.
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(self.write_community, mpModel=1),
+                UdpTransportTarget(
+                    (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
+                ),
+                ContextData(),
+                ObjectType(ObjectIdentity(self.RF_FREQ_CARRIER_OID), Integer32(freq_khz)),
+            )
+
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+
+            if errorIndication:
+                msg = f"SNMP Error: {errorIndication}"
+                self._log(f"[APPLY] {ip}: FALLÓ set_frequency — {msg}", "error")
+                return False, msg
+            elif errorStatus:
+                status_str = errorStatus.prettyPrint()
+                if "notWritable" in status_str:
+                    msg = f"Error de Permisos: La comunidad '{self.write_community}' es de SOLO LECTURA."
+                else:
+                    msg = f"SNMP Error: {status_str}"
+                self._log(f"[APPLY] {ip}: FALLÓ set_frequency — {msg}", "error")
+                return False, msg
+            else:
+                self._log(
+                    f"[APPLY] {ip}: SET rfFreqCarrier = {freq_khz} kHz OK", "info"
+                )
+                return True, "OK"
+
+        except Exception as e:
+            msg = str(e)
+            self._log(f"[APPLY] {ip}: Excepción set_frequency — {msg}", "error")
+            return False, msg
+
+    def set_sm_scan_list(self, ip: str, freqs_khz: list) -> Tuple[bool, str]:
+        """
+        Configurar lista de escaneo del SM via SNMP SET (rfScanList).
+
+        OID: 1.3.6.1.4.1.161.19.3.2.1.1.0 (OctetString, kHz separados por coma).
+        La lista de frecuencias se formatea con format_scan_list() de freq_utils.
+
+        Args:
+            ip: Dirección IP del SM.
+            freqs_khz: Lista de frecuencias en kHz. Ejemplo: [3550000, 3555000].
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        scan_list_str = format_scan_list(freqs_khz)
+        self._log(
+            f"[APPLY] {ip}: SET rfScanList = '{scan_list_str}' (OID {self.RF_SCAN_LIST_OID})",
+            "info",
+        )
+
+        success, msg = self._snmp_set_string(
+            ip=ip,
+            oid=self.RF_SCAN_LIST_OID,
+            value=scan_list_str,
+        )
+
+        if success:
+            self._log(
+                f"[APPLY] {ip}: SET rfScanList OK — '{scan_list_str}'", "info"
+            )
+        else:
+            self._log(
+                f"[APPLY] {ip}: FALLÓ set_sm_scan_list — {msg}", "error"
+            )
+
+        return success, msg
 
     def run_scan(self) -> Dict[str, Dict]:
         """

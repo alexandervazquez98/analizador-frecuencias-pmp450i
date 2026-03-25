@@ -32,6 +32,7 @@ VALID_ACTION_TYPES = frozenset(
         "TOWER_UPDATE",
         "TOWER_DELETE",
         "CONFIG_VERIFY",
+        "APPLY_FREQUENCY",  # change-006: frequency apply events
     }
 )
 

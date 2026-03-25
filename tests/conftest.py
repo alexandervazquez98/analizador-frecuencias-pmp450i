@@ -7,6 +7,46 @@ para que los módulos de la app se importen correctamente en entorno local.
 
 import sys
 import os
+from unittest.mock import MagicMock
+
+# ── pysnmp stub para Python 3.13 ──────────────────────────────────────────────
+# pysnmp 4.4.12 depende de 'asyncore' que fue eliminado en Python 3.13.
+# Producción corre en Docker (Python 3.11) donde pysnmp funciona correctamente.
+# Para los tests locales en 3.13, stubeamos los submódulos necesarios.
+_PYSNMP_MODULES = [
+    "pysnmp",
+    "pysnmp.hlapi",
+    "pysnmp.proto",
+    "pysnmp.proto.rfc1902",
+    "pysnmp.entity",
+    "pysnmp.entity.rfc3413",
+    "pysnmp.entity.rfc3413.oneliner",
+    "pysnmp.carrier",
+    "pysnmp.carrier.asyncore",
+    "pysnmp.carrier.asyncore.dgram",
+    "pysnmp.carrier.asyncore.dgram.udp",
+]
+
+for _mod in _PYSNMP_MODULES:
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+
+# Asegurar que los nombres usados en el wildcard import de tower_scan funcionen
+_pysnmp_hlapi = sys.modules["pysnmp.hlapi"]
+for _name in [
+    "SnmpEngine", "CommunityData", "UdpTransportTarget",
+    "ContextData", "ObjectType", "ObjectIdentity",
+    "setCmd", "getCmd",
+]:
+    if not hasattr(_pysnmp_hlapi, _name):
+        setattr(_pysnmp_hlapi, _name, MagicMock())
+
+# Integer32 y OctetString en proto.rfc1902
+_rfc1902 = sys.modules["pysnmp.proto.rfc1902"]
+for _name in ["Integer32", "OctetString"]:
+    if not hasattr(_rfc1902, _name):
+        setattr(_rfc1902, _name, MagicMock())
+# ──────────────────────────────────────────────────────────────────────────────
 
 # Agregar el directorio raíz al path para imports relativos
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,6 +54,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from app.audit_manager import AuditManager
 from app.db_manager import DatabaseManager
+
+# ── Inyectar atributos pysnmp en app.tower_scan ───────────────────────────────
+# 'from pysnmp.hlapi import *' en tower_scan.py no puede exportar nombres desde
+# un MagicMock stub (sin __all__ real). Los inyectamos manualmente AQUÍ,
+# después del import, para que patch.object(tower_scan_module, 'setCmd') funcione.
+import app.tower_scan as _tower_scan_mod
+
+for _attr in ["setCmd", "getCmd", "SnmpEngine", "CommunityData",
+              "UdpTransportTarget", "ContextData", "ObjectType", "ObjectIdentity"]:
+    if not hasattr(_tower_scan_mod, _attr):
+        setattr(_tower_scan_mod, _attr, MagicMock(name=_attr))
+
+for _attr in ["Integer32", "OctetString"]:
+    if not hasattr(_tower_scan_mod, _attr):
+        setattr(_tower_scan_mod, _attr, MagicMock(name=_attr))
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 
 
 @pytest.fixture

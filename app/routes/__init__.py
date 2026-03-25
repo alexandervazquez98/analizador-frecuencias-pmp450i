@@ -13,6 +13,7 @@ from .tower_routes import tower_bp
 from .user_routes import user_bp
 from .audit_routes import audit_bp
 from .config_routes import config_bp
+from .apply_routes import apply_bp
 
 
 def register_blueprints(app):
@@ -28,3 +29,4 @@ def register_blueprints(app):
     app.register_blueprint(user_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(config_bp)
+    app.register_blueprint(apply_bp)  # change-006: frequency apply endpoints
