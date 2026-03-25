@@ -239,6 +239,44 @@ class FrequencyApplyManager:
             errors.append(f"AP {ap_ip}: {ap_msg}")
             logger.error("[APPLY %d] AP %s failed: %s", apply_id, ap_ip, ap_msg)
 
+        # ── Step 4b: SET channel_width (opcional, si se provee) ───────────
+        channel_width_result = None
+        if channel_width and ap_success:
+            bw_success, bw_msg = self._scanner.set_channel_width(ap_ip, channel_width)
+            channel_width_result = {"success": bw_success, "error": bw_msg if not bw_success else None}
+            if bw_success:
+                logger.info("[APPLY %d] AP %s: channelBandwidth=%d MHz OK", apply_id, ap_ip, channel_width)
+            else:
+                # NO falla el apply — solo warning
+                errors.append(f"channel_width {ap_ip}: {bw_msg}")
+                logger.warning("[APPLY %d] channelBandwidth SET falló (non-fatal): %s", apply_id, bw_msg)
+
+        # ── Step 4c: SET contention_slots = 4 (OBLIGATORIO, non-fatal) ────
+        ct_success, ct_msg = self._scanner.set_contention_slots(ap_ip)
+        if ct_success:
+            logger.info("[APPLY %d] AP %s: contention_slots=4 OK", apply_id, ap_ip)
+        else:
+            errors.append(f"contention_slots {ap_ip}: {ct_msg}")
+            logger.warning("[APPLY %d] contention_slots SET falló (non-fatal): %s", apply_id, ct_msg)
+
+        # ── Step 4d: SET broadcast_retry = 0 (OBLIGATORIO, non-fatal) ─────
+        br_success, br_msg = self._scanner.set_broadcast_retry(ap_ip)
+        if br_success:
+            logger.info("[APPLY %d] AP %s: broadcastRetryCount=0 OK", apply_id, ap_ip)
+        else:
+            errors.append(f"broadcast_retry {ap_ip}: {br_msg}")
+            logger.warning("[APPLY %d] broadcast_retry SET falló (non-fatal): %s", apply_id, br_msg)
+
+        # ── Step 4e: rebootIfRequired = 1 (SIEMPRE, último paso) ──────────
+        # El equipo evaluará si los cambios requieren reinicio y lo ejecutará
+        # automáticamente. El AP quedará inaccesible ~30-60 s (esperado).
+        rb_success, rb_msg = self._scanner.reboot_if_required(ap_ip)
+        if rb_success:
+            logger.info("[APPLY %d] AP %s: rebootIfRequired=1 enviado OK", apply_id, ap_ip)
+        else:
+            errors.append(f"reboot {ap_ip}: {rb_msg}")
+            logger.warning("[APPLY %d] reboot_if_required SET falló (non-fatal): %s", apply_id, rb_msg)
+
         # ── Step 5: Determine final state ─────────────────────────────────
         # State machine rules (from spec Domain 8):
         #   AP fails → failed (regardless of SMs)
@@ -281,6 +319,11 @@ class FrequencyApplyManager:
             "apply_id": apply_id,
             "state": final_state,
             "freq_khz": freq_khz,
+            "channel_width_mhz": channel_width,
+            "channel_width_result": channel_width_result,
+            "contention_slots_ok": ct_success,
+            "broadcast_retry_ok": br_success,
+            "reboot_ok": rb_success,
             "sm_results": sm_results,
             "ap_result": ap_result,
             "errors": errors,
