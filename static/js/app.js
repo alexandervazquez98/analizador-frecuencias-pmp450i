@@ -632,10 +632,15 @@ function renderAPCard(ip, analysis) {
         if (!isViewer) {
             const scanId = appState.currentScanId || (appState.scanResults && appState.scanResults.scan_id);
             if (scanId) {
+                // Rango dinámico del combined_ranking del AP
+                const ranking = analysis.combined_ranking || [];
+                const freqs = ranking.map(f => f.frequency || f['Frecuencia Central (MHz)']).filter(Boolean);
+                const freqMin = freqs.length ? Math.min(...freqs) : 3400;
+                const freqMax = freqs.length ? Math.max(...freqs) : 6000;
                 applyBtn = `
                     <button type="button" class="btn btn-warning btn-sm ms-2"
                         id="applyBtn-${ip.replace(/\./g, '-')}"
-                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best.frequency}, ${best.combined_score}, ${best.is_viable})"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best.frequency}, ${best.combined_score}, ${best.is_viable}, ${freqMin}, ${freqMax})"
                         title="Aplicar frecuencia óptima vía SNMP">
                         <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
                     </button>`;
@@ -663,13 +668,18 @@ function renderAPCard(ip, analysis) {
         if (!isViewer) {
             const scanId = appState.currentScanId || (appState.scanResults && appState.scanResults.scan_id);
             if (scanId && best['Frecuencia Central (MHz)']) {
+                // Rango dinámico desde combined_ranking del AP (keys AP_ONLY)
+                const ranking = analysis.combined_ranking || [];
+                const freqs = ranking.map(f => f['Frecuencia Central (MHz)'] || f.frequency).filter(Boolean);
+                const freqMin = freqs.length ? Math.min(...freqs) : 3400;
+                const freqMax = freqs.length ? Math.max(...freqs) : 6000;
                 // Normalizar score a 0-1 (Puntaje Final es int, max teórico ~200)
                 const scoreNorm = ((best['Puntaje Final'] || 0) / 200).toFixed(2);
                 const isViableAP = best['Válido'] === 'Sí';
                 applyBtn = `
                     <button type="button" class="btn btn-warning btn-sm ms-2"
                         id="applyBtn-${ip.replace(/\./g, '-')}"
-                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best['Frecuencia Central (MHz)']}, ${scoreNorm}, ${isViableAP})"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best['Frecuencia Central (MHz)']}, ${scoreNorm}, ${isViableAP}, ${freqMin}, ${freqMax})"
                         title="Aplicar frecuencia óptima vía SNMP">
                         <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
                     </button>`;
@@ -1217,7 +1227,7 @@ function _ensureApplyModal() {
 /**
  * Tarea 4.2: Abre el modal de apply-frequency pre-llenado.
  */
-function openApplyModal(scanId, apIp, freqMhz, score, isViable) {
+function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax) {
     _ensureApplyModal();
     _applyModal.scanId = scanId;
     _applyModal.apIp = apIp;
@@ -1225,6 +1235,15 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable) {
     _applyModal.isViable = isViable;
     _applyModal.score = score;
     _applyModal.submitting = false;
+
+    // Rango dinámico: usar los extremos del análisis de espectro si están disponibles
+    const inputMin = freqMin || 3400;
+    const inputMax = freqMax || 6000;
+    _applyModal.freqMin = inputMin;
+    _applyModal.freqMax = inputMax;
+    const freqInput = document.getElementById('applyInputFreq');
+    freqInput.min = inputMin;
+    freqInput.max = inputMax;
 
     document.getElementById('applyInputFreq').value = freqMhz;
     document.getElementById('applyInputTower').value = '';
@@ -1274,8 +1293,11 @@ async function submitApplyFrequency() {
     if (_applyModal.submitting) return;
 
     const freqMhz = parseFloat(document.getElementById('applyInputFreq').value);
-    if (!freqMhz || freqMhz < 3400 || freqMhz > 6000) {
-        showApplyResult('danger', 'Frecuencia invalida. Debe estar entre 3400 y 6000 MHz.');
+    // Usar rango dinámico del modal (seteado al abrir con datos del análisis)
+    const freqMin = _applyModal.freqMin || 3400;
+    const freqMax = _applyModal.freqMax || 6000;
+    if (!freqMhz || freqMhz < freqMin || freqMhz > freqMax) {
+        showApplyResult('danger', `Frecuencia invalida. Debe estar entre ${freqMin} y ${freqMax} MHz.`);
         return;
     }
 
