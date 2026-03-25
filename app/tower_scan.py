@@ -986,9 +986,54 @@ class TowerScanner:
             self._log(f"[APPLY] {ip}: Excepción set_broadcast_retry — {msg}", "error")
             return False, msg
 
-    def run_scan(self) -> Dict[str, Dict]:
+    def reboot_if_required(self, ip: str) -> Tuple[bool, str]:
+        """Trigger conditional reboot on AP via SNMP SET rebootIfRequired.0 = 1.
+
+        OID: .1.3.6.1.4.1.161.19.3.3.3.4.0 (rebootIfRequired.0, Integer)
+        Value: 1 — the device evaluates pending changes and reboots automatically
+                     if any parameter (frequency, channel width, color code, etc.)
+                     requires it.
+
+        MUST be called LAST in the apply sequence, after all other SETs.
+        The AP will become unreachable for ~30-60 s during reboot.
+
+        Args:
+            ip: AP IP address.
+
+        Returns:
+            Tuple (success: bool, message: str).
+            NOTE: Even if SET succeeds, subsequent SNMP to this IP will time out
+            while the device reboots — this is expected behaviour.
         """
-        Ejecutar Tower Scan (wrapper síncrono)
+        REBOOT_OID = "1.3.6.1.4.1.161.19.3.3.3.4.0"  # rebootIfRequired.0
+        VALUE = 1
+
+        self._log(f"[APPLY] {ip}: SET rebootIfRequired = {VALUE} (reinicio condicional)", "info")
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(self.write_community, mpModel=1),
+                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                ContextData(),
+                ObjectType(ObjectIdentity(REBOOT_OID), Integer32(VALUE)),
+            )
+            errInd, errStat, _, _ = next(iterator)
+            if not errInd and not errStat:
+                self._log(
+                    f"[APPLY] {ip}: rebootIfRequired=1 enviado — el equipo reiniciará si es necesario",
+                    "info",
+                )
+                return True, "Reboot iniciado"
+            msg = f"SNMP Error: {errInd or errStat.prettyPrint()}"
+            self._log(f"[APPLY] {ip}: FALLÓ reboot_if_required — {msg}", "error")
+            return False, msg
+        except Exception as e:
+            msg = str(e)
+            self._log(f"[APPLY] {ip}: Excepción reboot_if_required — {msg}", "error")
+            return False, msg
+
+    def run_scan(self) -> Dict[str, Dict]:
+        """Ejecutar Tower Scan (wrapper síncrono).
 
         Returns:
             Diccionario con resultados por IP

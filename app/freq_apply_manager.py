@@ -267,6 +267,16 @@ class FrequencyApplyManager:
             errors.append(f"broadcast_retry {ap_ip}: {br_msg}")
             logger.warning("[APPLY %d] broadcast_retry SET falló (non-fatal): %s", apply_id, br_msg)
 
+        # ── Step 4e: rebootIfRequired = 1 (SIEMPRE, último paso) ──────────
+        # El equipo evaluará si los cambios requieren reinicio y lo ejecutará
+        # automáticamente. El AP quedará inaccesible ~30-60 s (esperado).
+        rb_success, rb_msg = self._scanner.reboot_if_required(ap_ip)
+        if rb_success:
+            logger.info("[APPLY %d] AP %s: rebootIfRequired=1 enviado OK", apply_id, ap_ip)
+        else:
+            errors.append(f"reboot {ap_ip}: {rb_msg}")
+            logger.warning("[APPLY %d] reboot_if_required SET falló (non-fatal): %s", apply_id, rb_msg)
+
         # ── Step 5: Determine final state ─────────────────────────────────
         # State machine rules (from spec Domain 8):
         #   AP fails → failed (regardless of SMs)
@@ -313,6 +323,7 @@ class FrequencyApplyManager:
             "channel_width_result": channel_width_result,
             "contention_slots_ok": ct_success,
             "broadcast_retry_ok": br_success,
+            "reboot_ok": rb_success,
             "sm_results": sm_results,
             "ap_result": ap_result,
             "errors": errors,

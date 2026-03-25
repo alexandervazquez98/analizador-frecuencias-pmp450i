@@ -1419,12 +1419,16 @@ async function submitApplyFrequency() {
             const extraOk = [
                 data.contention_slots_ok !== false ? '✓ CS=4' : '⚠ CS',
                 data.broadcast_retry_ok !== false ? '✓ BR=0' : '⚠ BR',
-            ].join(' ');
+                data.reboot_ok !== false ? '✓ Reboot' : '⚠ Reboot',
+            ].join(' &nbsp;');
 
             if (state === 'completed') {
                 let detail = `Frecuencia <strong>${freqResult} MHz${bwResult}</strong> aplicada correctamente`;
                 if (smErrors.length > 0) detail += `<br><small style="color:#ffc107;"><i class="bi bi-exclamation-triangle"></i> ${smErrors.length} SM(s) con errores — AP OK</small>`;
                 detail += `<br><small style="color:#aaa;">${extraOk}</small>`;
+                if (data.reboot_ok !== false) {
+                    detail += `<br><small style="color:#6edff6;"><i class="bi bi-arrow-clockwise"></i> El equipo está reiniciando (~30-60 s de inactividad)</small>`;
+                }
                 showApplyResult('success', `<i class="bi bi-check-circle-fill"></i> <strong>Completado</strong> (apply_id=${applyId})<br>${detail}`);
             } else {
                 const errMsg = apError || (data.errors || []).join('; ') || 'Error desconocido';
