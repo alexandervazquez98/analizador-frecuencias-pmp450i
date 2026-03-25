@@ -339,11 +339,27 @@ CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
         Returns:
             The new row ID (integer).
         """
-        # Normalize tower_id: empty string → None (FK allows NULL via ON DELETE SET NULL)
+        # Normalize tower_id: empty string or non-existent tower → None
         tower_id_val = tower_id if tower_id and tower_id.strip() else None
 
+        # Normalize scan_id: verify it exists in scans before linking.
+        # Scan may be in-memory but not yet persisted (race condition).
+        # NULL is safer than a broken FK.
+        scan_id_val = None
         conn = self.get_connection()
         try:
+            if scan_id:
+                row = conn.execute(
+                    "SELECT id FROM scans WHERE id = ?", (scan_id,)
+                ).fetchone()
+                scan_id_val = scan_id if row is not None else None
+                if scan_id_val is None:
+                    logger.warning(
+                        "[DB] create_frequency_apply: scan_id '%s' not in scans "
+                        "table — storing NULL to avoid FK violation.",
+                        scan_id,
+                    )
+
             cursor = conn.execute(
                 """INSERT INTO frequency_applies
                    (tower_id, scan_id, applied_by, applied_by_username,
@@ -351,7 +367,7 @@ CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
                 (
                     tower_id_val,
-                    scan_id,
+                    scan_id_val,
                     applied_by,
                     applied_by_username,
                     freq_khz,
