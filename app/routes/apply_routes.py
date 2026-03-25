@@ -114,14 +114,13 @@ def apply_frequency():
 
     scan_id = data.get("scan_id")
     freq_mhz = data.get("freq_mhz")
-    tower_id = data.get("tower_id")
+    # tower_id es OPCIONAL — campo de auditoría, no requerido para el apply SNMP
+    tower_id = data.get("tower_id") or None
 
     if not scan_id:
         return jsonify({"error": "scan_id is required"}), 400
     if freq_mhz is None:
         return jsonify({"error": "freq_mhz is required"}), 400
-    if not tower_id:
-        return jsonify({"error": "tower_id is required"}), 400
 
     try:
         freq_mhz = float(freq_mhz)

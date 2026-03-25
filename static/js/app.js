@@ -1301,7 +1301,8 @@ async function submitApplyFrequency() {
         return;
     }
 
-    const towerId = (document.getElementById('applyInputTower').value || '').trim() || _applyModal.apIp;
+    // tower_id es opcional — si el usuario no lo llena se envía null
+    const towerId = (document.getElementById('applyInputTower').value || '').trim() || null;
     const forceCheck = document.getElementById('applyForceCheck');
     const force = !!(forceCheck && forceCheck.checked);
 
