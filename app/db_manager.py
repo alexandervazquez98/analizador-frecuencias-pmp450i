@@ -86,6 +86,23 @@ CREATE TABLE IF NOT EXISTS config_verifications (
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS frequency_applies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tower_id TEXT REFERENCES towers(tower_id) ON DELETE SET NULL,
+    scan_id TEXT REFERENCES scans(id) ON DELETE SET NULL,
+    applied_by INTEGER REFERENCES users(id),
+    applied_by_username TEXT NOT NULL,
+    freq_khz INTEGER NOT NULL,
+    prev_freq_khz INTEGER,
+    channel_width INTEGER,
+    state TEXT NOT NULL DEFAULT 'pending',
+    sm_results TEXT,
+    ap_result TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
 """
 
 _INDEX_SQL = """
@@ -99,6 +116,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_scan ON audit_logs(scan_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(start_timestamp);
 CREATE INDEX IF NOT EXISTS idx_config_scan ON config_verifications(scan_id);
 CREATE INDEX IF NOT EXISTS idx_towers_created ON towers(created_at);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_tower ON frequency_applies(tower_id);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_scan ON frequency_applies(scan_id);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
 """
 
 
@@ -178,6 +198,40 @@ class DatabaseManager:
                     conn.execute("ALTER TABLE scans ADD COLUMN logs TEXT")
                     conn.commit()
                     logger.info("Migration: added 'logs' column to scans table")
+
+                # Migration: frequency_applies table (change-006 — frequency apply)
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                if "frequency_applies" not in tables:
+                    conn.executescript("""
+CREATE TABLE IF NOT EXISTS frequency_applies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tower_id TEXT REFERENCES towers(tower_id) ON DELETE SET NULL,
+    scan_id TEXT REFERENCES scans(id) ON DELETE SET NULL,
+    applied_by INTEGER REFERENCES users(id),
+    applied_by_username TEXT NOT NULL,
+    freq_khz INTEGER NOT NULL,
+    prev_freq_khz INTEGER,
+    channel_width INTEGER,
+    state TEXT NOT NULL DEFAULT 'pending',
+    sm_results TEXT,
+    ap_result TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_tower ON frequency_applies(tower_id);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_scan ON frequency_applies(scan_id);
+CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
+""")
+                    conn.commit()
+                    logger.info(
+                        "Migration: created 'frequency_applies' table (change-006)"
+                    )
             finally:
                 conn.close()
 
@@ -258,3 +312,96 @@ class DatabaseManager:
                 conn.close()
 
         return migrated
+
+    # ── frequency_applies helpers (change-006) ────────────────────────────────
+
+    def create_frequency_apply(
+        self,
+        tower_id: str,
+        scan_id: str,
+        freq_khz: int,
+        applied_by_username: str,
+        applied_by: int = None,
+        channel_width: int = None,
+        prev_freq_khz: int = None,
+    ) -> int:
+        """Insert a new frequency_applies record and return its ID.
+
+        Args:
+            tower_id: Tower identifier (FK towers.tower_id).
+            scan_id: Scan identifier (FK scans.id). Can be None for manual applies.
+            freq_khz: Target frequency in kHz.
+            applied_by_username: Username string for audit trail.
+            applied_by: User ID (FK users.id). Can be None for auto-apply ('system').
+            channel_width: Channel width in MHz. Optional for v1.
+            prev_freq_khz: Previous frequency in kHz (for future revert). Optional.
+
+        Returns:
+            The new row ID (integer).
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.execute(
+                """INSERT INTO frequency_applies
+                   (tower_id, scan_id, applied_by, applied_by_username,
+                    freq_khz, prev_freq_khz, channel_width, state)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                (
+                    tower_id,
+                    scan_id,
+                    applied_by,
+                    applied_by_username,
+                    freq_khz,
+                    prev_freq_khz,
+                    channel_width,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def update_frequency_apply_status(
+        self,
+        apply_id: int,
+        state: str,
+        error: str = None,
+        sm_results: str = None,
+        ap_result: str = None,
+        completed: bool = False,
+    ) -> None:
+        """Update state (and optionally results/error) of a frequency_applies row.
+
+        Args:
+            apply_id: Row ID to update.
+            state: New state value. One of: pending, sms_applied, ap_applied,
+                   completed, failed.
+            error: Error message to record. Optional.
+            sm_results: JSON string with per-SM results. Optional.
+            ap_result: JSON string with AP result. Optional.
+            completed: If True, sets completed_at to current timestamp.
+        """
+        fields = ["state = ?"]
+        params: list = [state]
+
+        if error is not None:
+            fields.append("error = ?")
+            params.append(error)
+        if sm_results is not None:
+            fields.append("sm_results = ?")
+            params.append(sm_results)
+        if ap_result is not None:
+            fields.append("ap_result = ?")
+            params.append(ap_result)
+        if completed:
+            fields.append("completed_at = datetime('now')")
+
+        params.append(apply_id)
+        sql = f"UPDATE frequency_applies SET {', '.join(fields)} WHERE id = ?"
+
+        conn = self.get_connection()
+        try:
+            conn.execute(sql, params)
+            conn.commit()
+        finally:
+            conn.close()
