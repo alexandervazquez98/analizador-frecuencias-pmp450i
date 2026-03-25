@@ -839,12 +839,13 @@ class TowerScanner:
     def set_channel_width(self, ip: str, width_mhz: int) -> Tuple[bool, str]:
         """SET channel bandwidth on AP via SNMP.
 
-        Tries OIDs in priority order (fw >= 24.0 first, then historical fallbacks):
-          1. .1.3.6.1.4.1.161.19.3.3.2.221.0  — fw 24.1.1 (Integer, same OID as SPECTRUM_ACTION)
-          2. .1.3.6.1.4.1.161.19.3.3.2.91.0   — bandwidth.0 historical Integer
-          3. .1.3.6.1.4.1.161.19.3.3.2.83.0   — channelBandwidth.0 historical OctetString
+        OID priority (according to Cambium MIB documentation):
+          1. .1.3.6.1.4.1.161.19.3.3.2.91.0  — bandwidth.0 (Integer, RECOMMENDED for software)
+             Integer mapping: 1=5MHz, 2=10MHz, 3=15MHz, 4=20MHz, 5=30MHz, 6=40MHz
+          2. .1.3.6.1.4.1.161.19.3.3.2.83.0  — channelBandwidth.0 (OctetString fallback)
+             String format: "5.0 MHz", "10.0 MHz", "20.0 MHz", etc.
 
-        Integer mapping: 1=5MHz, 2=10MHz, 3=15MHz, 4=20MHz, 5=30MHz, 6=40MHz.
+        NOTE: OID 221.0 is SPECTRUM_ACTION_OID — do NOT use it for channel bandwidth.
 
         Args:
             ip:        AP IP address.
@@ -858,57 +859,48 @@ class TowerScanner:
         if bw_int is None:
             return False, f"Ancho de canal {width_mhz} MHz no soportado. Válidos: {list(BW_INT_MAP.keys())}"
 
-        # OID order: fw24.1.1 → historical int → historical string
-        CHANNEL_BW_OID_PRIMARY   = "1.3.6.1.4.1.161.19.3.3.2.221.0"  # fw 24.1.1 Integer
-        CHANNEL_BW_OID_HIST_INT  = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
-        CHANNEL_BW_OID_HIST_STR  = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
+        # OID 1: Integer (recomendado para software)
+        CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
+        # OID 2: OctetString fallback — valor debe ser "X.0 MHz"
+        CHANNEL_BW_OID_STR = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
+        bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz", "5.0 MHz", etc.
 
-        self._log(f"[APPLY] {ip}: SET channelBandwidth = {width_mhz} MHz (int={bw_int})", "info")
+        self._log(
+            f"[APPLY] {ip}: SET channelBandwidth = {width_mhz} MHz "
+            f"(int={bw_int}, str='{bw_str}')",
+            "info",
+        )
 
-        # Try 1: Primary OID (Integer) — fw24.1.1
+        # Try 1: Integer OID .91.0 (recomendado)
         try:
             iterator = setCmd(
                 SnmpEngine(),
                 CommunityData(self.write_community, mpModel=1),
                 UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
                 ContextData(),
-                ObjectType(ObjectIdentity(CHANNEL_BW_OID_PRIMARY), Integer32(bw_int)),
+                ObjectType(ObjectIdentity(CHANNEL_BW_OID_INT), Integer32(bw_int)),
             )
             errInd, errStat, _, _ = next(iterator)
             if not errInd and not errStat:
-                self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID primary)", "info")
+                self._log(f"[APPLY] {ip}: SET channelBandwidth={width_mhz}MHz OK (OID .91.0 int={bw_int})", "info")
                 return True, "OK"
-            self._log(f"[APPLY] {ip}: OID primary falló ({errInd or errStat}) — probando histórico int", "warning")
-        except Exception as e:
-            self._log(f"[APPLY] {ip}: Excepción OID primary — {e} — probando histórico int", "warning")
-
-        # Try 2: Historical Integer OID
-        try:
-            iterator = setCmd(
-                SnmpEngine(),
-                CommunityData(self.write_community, mpModel=1),
-                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
-                ContextData(),
-                ObjectType(ObjectIdentity(CHANNEL_BW_OID_HIST_INT), Integer32(bw_int)),
+            self._log(
+                f"[APPLY] {ip}: OID .91.0 falló ({errInd or errStat}) — probando OctetString .83.0",
+                "warning",
             )
-            errInd, errStat, _, _ = next(iterator)
-            if not errInd and not errStat:
-                self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID hist-int)", "info")
-                return True, "OK"
-            self._log(f"[APPLY] {ip}: OID hist-int falló ({errInd or errStat}) — probando histórico string", "warning")
         except Exception as e:
-            self._log(f"[APPLY] {ip}: Excepción OID hist-int — {e} — probando histórico string", "warning")
+            self._log(f"[APPLY] {ip}: Excepción OID .91.0 — {e} — probando OctetString .83.0", "warning")
 
-        # Try 3: Historical OctetString OID
+        # Try 2: OctetString OID .83.0 — valor "X.0 MHz"
         success, msg = self._snmp_set_string(
             ip=ip,
-            oid=CHANNEL_BW_OID_HIST_STR,
-            value=str(width_mhz),
+            oid=CHANNEL_BW_OID_STR,
+            value=bw_str,
         )
         if success:
-            self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID hist-string)", "info")
+            self._log(f"[APPLY] {ip}: SET channelBandwidth='{bw_str}' OK (OID .83.0 string)", "info")
         else:
-            self._log(f"[APPLY] {ip}: FALLÓ todos los OIDs de channelBandwidth — {msg}", "error")
+            self._log(f"[APPLY] {ip}: FALLÓ ambos OIDs de channelBandwidth — {msg}", "error")
         return success, msg
 
     def set_contention_slots(self, ip: str) -> Tuple[bool, str]:
