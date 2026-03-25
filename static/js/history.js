@@ -201,6 +201,30 @@ async function openScanDetail(scanId) {
             if (firstIp) document.getElementById('verifFieldApIp').value = firstIp;
         }
 
+        // Calcular antigüedad del scan para el aviso
+        const scanAgeMs = timestamp ? (Date.now() - new Date(timestamp).getTime()) : Infinity;
+        const scanAgeMin = Math.round(scanAgeMs / 60000);
+        const scanAgeHours = (scanAgeMs / 3600000).toFixed(1);
+        const isFresh = scanAgeMs < 30 * 60 * 1000; // < 30 minutos
+
+        const applyBlockBanner = isFresh
+            ? `<div style="margin-top:.75rem;padding:.6rem .9rem;background:#1a2e1a;border:1px solid #198754;border-radius:6px;font-size:.82rem;color:#75b798;display:flex;align-items:center;gap:.6rem;">
+                <i class="bi bi-lightning-charge-fill" style="color:#ffc107;font-size:1rem;"></i>
+                <span>Scan reciente (${scanAgeMin} min). Para aplicar la frecuencia, buscá este scan en la vista de resultados activos.</span>
+               </div>`
+            : `<div style="margin-top:.75rem;padding:.6rem .9rem;background:#1e1a10;border:1px solid #664d00;border-radius:6px;font-size:.82rem;color:#ffda6a;display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap;">
+                <span>
+                    <i class="bi bi-lock-fill" style="color:#ffc107;"></i>
+                    <strong>Aplicar frecuencia deshabilitado</strong> — este scan tiene <strong>${scanAgeHours}h</strong> de antigüedad.
+                    Los datos del espectro pueden haber cambiado. Realizá un nuevo escaneo para aplicar.
+                </span>
+                <button disabled
+                    style="padding:.25rem .75rem;background:#333;border:1px solid #555;border-radius:5px;color:#666;font-size:.8rem;cursor:not-allowed;white-space:nowrap;"
+                    title="No disponible para escaneos históricos. Realizá un nuevo escaneo.">
+                    <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec. — Bloqueado
+                </button>
+               </div>`;
+
         contentEl.innerHTML = `
             <div class="row g-2">
                 <div class="col-auto">
@@ -216,6 +240,7 @@ async function openScanDetail(scanId) {
                     <span class="text-muted small">${dateStr}</span>
                 </div>
             </div>
+            ${applyBlockBanner}
         `;
     } catch (err) {
         contentEl.innerHTML = `<span class="text-danger">Error cargando detalles: ${escapeHtml(err.message)}</span>`;
