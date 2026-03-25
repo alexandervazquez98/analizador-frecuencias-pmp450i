@@ -632,15 +632,18 @@ function renderAPCard(ip, analysis) {
         if (!isViewer) {
             const scanId = appState.currentScanId || (appState.scanResults && appState.scanResults.scan_id);
             if (scanId) {
-                // Rango dinámico del combined_ranking del AP
+                // Rango dinámico y ranking del combined_ranking del AP (AP_SM_CROSS)
                 const ranking = analysis.combined_ranking || [];
                 const freqs = ranking.map(f => f.frequency || f['Frecuencia Central (MHz)']).filter(Boolean);
                 const freqMin = freqs.length ? Math.min(...freqs) : 3400;
                 const freqMax = freqs.length ? Math.max(...freqs) : 6000;
+                const recBw = best.channel_width || 20;
+                const rankingJson = escapeAttr(JSON.stringify(ranking.slice(0, 20)));
                 applyBtn = `
                     <button type="button" class="btn btn-warning btn-sm ms-2"
                         id="applyBtn-${ip.replace(/\./g, '-')}"
-                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best.frequency}, ${best.combined_score}, ${best.is_viable}, ${freqMin}, ${freqMax})"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best.frequency}, ${best.combined_score}, ${best.is_viable}, ${freqMin}, ${freqMax}, JSON.parse(this.dataset.ranking), ${recBw})"
+                        data-ranking='${rankingJson}'
                         title="Aplicar frecuencia óptima vía SNMP">
                         <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
                     </button>`;
@@ -673,13 +676,16 @@ function renderAPCard(ip, analysis) {
                 const freqs = ranking.map(f => f['Frecuencia Central (MHz)'] || f.frequency).filter(Boolean);
                 const freqMin = freqs.length ? Math.min(...freqs) : 3400;
                 const freqMax = freqs.length ? Math.max(...freqs) : 6000;
+                const recBw = best['Ancho Banda (MHz)'] || 20;
+                const rankingJson = escapeAttr(JSON.stringify(ranking.slice(0, 20)));
                 // Normalizar score a 0-1 (Puntaje Final es int, max teórico ~200)
                 const scoreNorm = ((best['Puntaje Final'] || 0) / 200).toFixed(2);
                 const isViableAP = best['Válido'] === 'Sí';
                 applyBtn = `
                     <button type="button" class="btn btn-warning btn-sm ms-2"
                         id="applyBtn-${ip.replace(/\./g, '-')}"
-                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best['Frecuencia Central (MHz)']}, ${scoreNorm}, ${isViableAP}, ${freqMin}, ${freqMax})"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best['Frecuencia Central (MHz)']}, ${scoreNorm}, ${isViableAP}, ${freqMin}, ${freqMax}, JSON.parse(this.dataset.ranking), ${recBw})"
+                        data-ranking='${rankingJson}'
                         title="Aplicar frecuencia óptima vía SNMP">
                         <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
                     </button>`;
@@ -1170,6 +1176,10 @@ const _applyModal = {
     freqMhz: null,
     isViable: null,
     score: null,
+    ranking: [],       // Top-20 frecuencias del análisis
+    freqMin: 3400,
+    freqMax: 6000,
+    recommendedBw: 20, // Ancho de canal recomendado por el análisis
     submitting: false,
 };
 
@@ -1183,17 +1193,49 @@ function _ensureApplyModal() {
     modal.id = 'applyFreqModal';
     modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);overflow:auto;';
     modal.innerHTML = `
-        <div style="margin:6% auto;max-width:480px;background:#1e1e2e;border:1px solid #444;border-radius:10px;padding:1.5rem;color:#e0e0e0;box-shadow:0 8px 32px #0008;">
+        <div style="margin:4% auto;max-width:520px;background:#1e1e2e;border:1px solid #444;border-radius:10px;padding:1.5rem;color:#e0e0e0;box-shadow:0 8px 32px #0008;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
                 <h5 style="margin:0;"><i class="bi bi-lightning-charge-fill" style="color:#ffc107;"></i> Aplicar Frecuencia Optima</h5>
                 <button onclick="closeApplyModal()" style="background:none;border:none;color:#aaa;font-size:1.4rem;cursor:pointer;">&times;</button>
             </div>
             <div id="applyModalBadges" style="margin-bottom:1rem;display:flex;gap:.5rem;flex-wrap:wrap;"></div>
+
+            <!-- Dropdown: Frecuencia del ranking -->
             <div style="margin-bottom:.75rem;">
-                <label for="applyInputFreq" style="font-size:.85rem;color:#aaa;">Frecuencia (MHz)</label>
-                <input type="number" id="applyInputFreq" step="0.5" min="3400" max="6000"
-                    style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:1rem;">
+                <label for="applySelectFreq" style="font-size:.85rem;color:#aaa;">
+                    <i class="bi bi-broadcast" style="color:#ffc107;"></i>
+                    Frecuencia (MHz) <span style="color:#555;font-size:.78rem;">Top-20 del análisis</span>
+                </label>
+                <select id="applySelectFreq"
+                    onchange="_onApplyFreqChange(this.value)"
+                    style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:.95rem;">
+                </select>
             </div>
+
+            <!-- Dropdown: Ancho de canal -->
+            <div style="margin-bottom:.75rem;">
+                <label for="applySelectBw" style="font-size:.85rem;color:#aaa;">
+                    <i class="bi bi-arrows-expand"></i>
+                    Ancho de Canal <span style="color:#555;font-size:.78rem;">(se aplicará vía SNMP)</span>
+                </label>
+                <select id="applySelectBw"
+                    style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:.95rem;">
+                    <option value="5">5 MHz</option>
+                    <option value="10">10 MHz</option>
+                    <option value="15">15 MHz</option>
+                    <option value="20" selected>20 MHz</option>
+                    <option value="30">30 MHz</option>
+                    <option value="40">40 MHz</option>
+                </select>
+            </div>
+
+            <!-- Info fija -->
+            <div style="margin-bottom:.75rem;padding:.5rem .75rem;background:#16161f;border-radius:6px;font-size:.8rem;color:#888;">
+                <i class="bi bi-info-circle"></i>
+                Al aplicar también se configurará: <strong style="color:#aaa;">Contention Slots = 4</strong> &amp; <strong style="color:#aaa;">Broadcast Retry = 0</strong>
+            </div>
+
+            <!-- Tower ID -->
             <div style="margin-bottom:.75rem;">
                 <label for="applyInputTower" style="font-size:.85rem;color:#aaa;">Tower ID <span style="color:#777;">(opcional)</span></label>
                 <input type="text" id="applyInputTower" placeholder="Ej: TORRE-01"
@@ -1226,8 +1268,10 @@ function _ensureApplyModal() {
 
 /**
  * Tarea 4.2: Abre el modal de apply-frequency pre-llenado.
+ * ranking: array de objetos del combined_ranking (top-20)
+ * recommendedBw: ancho de canal recomendado en MHz
  */
-function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax) {
+function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax, ranking, recommendedBw) {
     _ensureApplyModal();
     _applyModal.scanId = scanId;
     _applyModal.apIp = apIp;
@@ -1235,17 +1279,44 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
     _applyModal.isViable = isViable;
     _applyModal.score = score;
     _applyModal.submitting = false;
+    _applyModal.ranking = ranking || [];
+    _applyModal.freqMin = freqMin || 3400;
+    _applyModal.freqMax = freqMax || 6000;
+    _applyModal.recommendedBw = recommendedBw || 20;
 
-    // Rango dinámico: usar los extremos del análisis de espectro si están disponibles
-    const inputMin = freqMin || 3400;
-    const inputMax = freqMax || 6000;
-    _applyModal.freqMin = inputMin;
-    _applyModal.freqMax = inputMax;
-    const freqInput = document.getElementById('applyInputFreq');
-    freqInput.min = inputMin;
-    freqInput.max = inputMax;
+    // ── Poblar dropdown de frecuencias (top-20 del ranking) ──────────────
+    const freqSelect = document.getElementById('applySelectFreq');
+    freqSelect.innerHTML = '';
+    const top20 = _applyModal.ranking.slice(0, 20);
+    if (top20.length === 0) {
+        // Fallback: solo la frecuencia recomendada
+        const opt = document.createElement('option');
+        opt.value = freqMhz;
+        opt.textContent = `${freqMhz} MHz — Recomendada`;
+        freqSelect.appendChild(opt);
+    } else {
+        top20.forEach((item, idx) => {
+            const fMhz = item.frequency ?? item['Frecuencia Central (MHz)'];
+            const score = item.combined_score ?? item['Puntaje Final'] ?? item.score ?? '';
+            const bw = item.channel_width ?? item['Ancho Banda (MHz)'] ?? '';
+            const isRec = fMhz == freqMhz;
+            const label = isRec
+                ? `★ ${fMhz} MHz — ${bw ? bw + 'MHz BW | ' : ''}Score: ${score} (Recomendada)`
+                : `${String(idx + 1).padStart(2, '0')}. ${fMhz} MHz — ${bw ? bw + 'MHz BW | ' : ''}Score: ${score}`;
+            const opt = document.createElement('option');
+            opt.value = fMhz;
+            if (isRec) opt.selected = true;
+            opt.textContent = label;
+            freqSelect.appendChild(opt);
+        });
+    }
 
-    document.getElementById('applyInputFreq').value = freqMhz;
+    // ── Pre-seleccionar ancho de canal recomendado ────────────────────────
+    const bwSelect = document.getElementById('applySelectBw');
+    const validBws = [5, 10, 15, 20, 30, 40];
+    const bwToSelect = validBws.includes(Number(_applyModal.recommendedBw)) ? _applyModal.recommendedBw : 20;
+    Array.from(bwSelect.options).forEach(o => { o.selected = Number(o.value) === Number(bwToSelect); });
+
     document.getElementById('applyInputTower').value = '';
     const forceCheck = document.getElementById('applyForceCheck');
     if (forceCheck) forceCheck.checked = false;
@@ -1263,9 +1334,7 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
             Score: <strong>${Number(score).toFixed(2)}</strong>
         </span>`;
 
-    document.getElementById('applyInfoBox').innerHTML = isViable
-        ? `<i class="bi bi-check-circle-fill" style="color:#198754;"></i> Frecuencia <strong>${freqMhz} MHz</strong> viable. Se aplicara primero a los SMs y luego al AP.`
-        : `<i class="bi bi-exclamation-triangle-fill" style="color:#dc3545;"></i> Frecuencia <strong>${freqMhz} MHz</strong> <strong>no viable</strong>. Requiere forzar (solo admin).`;
+    _onApplyFreqChange(freqMhz);
 
     const forceWrapper = document.getElementById('applyForceWrapper');
     if (forceWrapper) forceWrapper.style.display = (window.userRole === 'admin') ? '' : 'none';
@@ -1280,6 +1349,17 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
     document.getElementById('applyFreqModal').style.display = 'block';
 }
 
+/**
+ * Actualiza el infoBox cuando el operador cambia la frecuencia seleccionada.
+ */
+function _onApplyFreqChange(freqVal) {
+    const fMhz = parseFloat(freqVal);
+    const isViable = _applyModal.isViable;
+    document.getElementById('applyInfoBox').innerHTML = isViable
+        ? `<i class="bi bi-check-circle-fill" style="color:#198754;"></i> Frecuencia <strong>${fMhz} MHz</strong> viable. Se aplicara primero a los SMs y luego al AP.`
+        : `<i class="bi bi-exclamation-triangle-fill" style="color:#dc3545;"></i> Frecuencia <strong>${fMhz} MHz</strong> <strong>no viable</strong>. Requiere forzar (solo admin).`;
+}
+
 function closeApplyModal() {
     const modal = document.getElementById('applyFreqModal');
     if (modal) modal.style.display = 'none';
@@ -1292,14 +1372,15 @@ function closeApplyModal() {
 async function submitApplyFrequency() {
     if (_applyModal.submitting) return;
 
-    const freqMhz = parseFloat(document.getElementById('applyInputFreq').value);
-    // Usar rango dinámico del modal (seteado al abrir con datos del análisis)
-    const freqMin = _applyModal.freqMin || 3400;
-    const freqMax = _applyModal.freqMax || 6000;
-    if (!freqMhz || freqMhz < freqMin || freqMhz > freqMax) {
-        showApplyResult('danger', `Frecuencia invalida. Debe estar entre ${freqMin} y ${freqMax} MHz.`);
+    // Leer frecuencia del dropdown
+    const freqMhz = parseFloat(document.getElementById('applySelectFreq').value);
+    if (!freqMhz || isNaN(freqMhz)) {
+        showApplyResult('danger', 'Selecciona una frecuencia valida.');
         return;
     }
+
+    // Leer ancho de canal del dropdown
+    const channelWidthMhz = parseInt(document.getElementById('applySelectBw').value, 10);
 
     // tower_id es opcional — si el usuario no lo llena se envía null
     const towerId = (document.getElementById('applyInputTower').value || '').trim() || null;
@@ -1315,7 +1396,13 @@ async function submitApplyFrequency() {
         const res = await authFetch('/api/apply-frequency', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scan_id: _applyModal.scanId, freq_mhz: freqMhz, tower_id: towerId, force }),
+            body: JSON.stringify({
+                scan_id: _applyModal.scanId,
+                freq_mhz: freqMhz,
+                channel_width_mhz: channelWidthMhz,
+                tower_id: towerId,
+                force,
+            }),
         });
         if (!res) { _applyModal.submitting = false; return; }
 
@@ -1326,12 +1413,18 @@ async function submitApplyFrequency() {
             const state = data.state || 'unknown';
             const applyId = data.apply_id;
             const freqResult = data.freq_khz ? (data.freq_khz / 1000).toFixed(1) : freqMhz;
+            const bwResult = data.channel_width_mhz ? ` | BW ${data.channel_width_mhz} MHz` : '';
             const smErrors = (data.errors || []).filter(e => e.startsWith('SM'));
             const apError = (data.errors || []).find(e => e.startsWith('AP'));
+            const extraOk = [
+                data.contention_slots_ok !== false ? '✓ CS=4' : '⚠ CS',
+                data.broadcast_retry_ok !== false ? '✓ BR=0' : '⚠ BR',
+            ].join(' ');
 
             if (state === 'completed') {
-                let detail = `Frecuencia <strong>${freqResult} MHz</strong> aplicada correctamente`;
+                let detail = `Frecuencia <strong>${freqResult} MHz${bwResult}</strong> aplicada correctamente`;
                 if (smErrors.length > 0) detail += `<br><small style="color:#ffc107;"><i class="bi bi-exclamation-triangle"></i> ${smErrors.length} SM(s) con errores — AP OK</small>`;
+                detail += `<br><small style="color:#aaa;">${extraOk}</small>`;
                 showApplyResult('success', `<i class="bi bi-check-circle-fill"></i> <strong>Completado</strong> (apply_id=${applyId})<br>${detail}`);
             } else {
                 const errMsg = apError || (data.errors || []).join('; ') || 'Error desconocido';

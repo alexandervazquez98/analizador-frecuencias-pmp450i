@@ -836,6 +836,156 @@ class TowerScanner:
 
         return success, msg
 
+    def set_channel_width(self, ip: str, width_mhz: int) -> Tuple[bool, str]:
+        """SET channel bandwidth on AP via SNMP.
+
+        Tries OIDs in priority order (fw >= 24.0 first, then historical fallbacks):
+          1. .1.3.6.1.4.1.161.19.3.3.2.221.0  — fw 24.1.1 (Integer, same OID as SPECTRUM_ACTION)
+          2. .1.3.6.1.4.1.161.19.3.3.2.91.0   — bandwidth.0 historical Integer
+          3. .1.3.6.1.4.1.161.19.3.3.2.83.0   — channelBandwidth.0 historical OctetString
+
+        Integer mapping: 1=5MHz, 2=10MHz, 3=15MHz, 4=20MHz, 5=30MHz, 6=40MHz.
+
+        Args:
+            ip:        AP IP address.
+            width_mhz: Desired channel width in MHz (5, 10, 15, 20, 30 or 40).
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        BW_INT_MAP = {5: 1, 10: 2, 15: 3, 20: 4, 30: 5, 40: 6}
+        bw_int = BW_INT_MAP.get(int(width_mhz))
+        if bw_int is None:
+            return False, f"Ancho de canal {width_mhz} MHz no soportado. Válidos: {list(BW_INT_MAP.keys())}"
+
+        # OID order: fw24.1.1 → historical int → historical string
+        CHANNEL_BW_OID_PRIMARY   = "1.3.6.1.4.1.161.19.3.3.2.221.0"  # fw 24.1.1 Integer
+        CHANNEL_BW_OID_HIST_INT  = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
+        CHANNEL_BW_OID_HIST_STR  = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
+
+        self._log(f"[APPLY] {ip}: SET channelBandwidth = {width_mhz} MHz (int={bw_int})", "info")
+
+        # Try 1: Primary OID (Integer) — fw24.1.1
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(self.write_community, mpModel=1),
+                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                ContextData(),
+                ObjectType(ObjectIdentity(CHANNEL_BW_OID_PRIMARY), Integer32(bw_int)),
+            )
+            errInd, errStat, _, _ = next(iterator)
+            if not errInd and not errStat:
+                self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID primary)", "info")
+                return True, "OK"
+            self._log(f"[APPLY] {ip}: OID primary falló ({errInd or errStat}) — probando histórico int", "warning")
+        except Exception as e:
+            self._log(f"[APPLY] {ip}: Excepción OID primary — {e} — probando histórico int", "warning")
+
+        # Try 2: Historical Integer OID
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(self.write_community, mpModel=1),
+                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                ContextData(),
+                ObjectType(ObjectIdentity(CHANNEL_BW_OID_HIST_INT), Integer32(bw_int)),
+            )
+            errInd, errStat, _, _ = next(iterator)
+            if not errInd and not errStat:
+                self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID hist-int)", "info")
+                return True, "OK"
+            self._log(f"[APPLY] {ip}: OID hist-int falló ({errInd or errStat}) — probando histórico string", "warning")
+        except Exception as e:
+            self._log(f"[APPLY] {ip}: Excepción OID hist-int — {e} — probando histórico string", "warning")
+
+        # Try 3: Historical OctetString OID
+        success, msg = self._snmp_set_string(
+            ip=ip,
+            oid=CHANNEL_BW_OID_HIST_STR,
+            value=str(width_mhz),
+        )
+        if success:
+            self._log(f"[APPLY] {ip}: SET channelBandwidth OK (OID hist-string)", "info")
+        else:
+            self._log(f"[APPLY] {ip}: FALLÓ todos los OIDs de channelBandwidth — {msg}", "error")
+        return success, msg
+
+    def set_contention_slots(self, ip: str) -> Tuple[bool, str]:
+        """SET numCtlSlotsHW = 4 (hardcoded, OBLIGATORIO).
+
+        OID primario: .1.3.6.1.4.1.161.19.3.1.1.42.0 (numCtlSlotsHW.0, Integer)
+        OID alternativo: .1.3.6.1.4.1.161.19.3.1.10.1.1.4.1 (radioControlSlots.1)
+
+        Args:
+            ip: AP IP address.
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        CONTENTION_OID_PRIMARY = "1.3.6.1.4.1.161.19.3.1.1.42.0"   # numCtlSlotsHW.0
+        CONTENTION_OID_ALT     = "1.3.6.1.4.1.161.19.3.1.10.1.1.4.1"  # radioControlSlots.1
+        VALUE = 4
+
+        self._log(f"[APPLY] {ip}: SET numCtlSlotsHW = {VALUE} (contention slots)", "info")
+
+        for oid, label in [(CONTENTION_OID_PRIMARY, "primary"), (CONTENTION_OID_ALT, "alt")]:
+            try:
+                iterator = setCmd(
+                    SnmpEngine(),
+                    CommunityData(self.write_community, mpModel=1),
+                    UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                    ContextData(),
+                    ObjectType(ObjectIdentity(oid), Integer32(VALUE)),
+                )
+                errInd, errStat, _, _ = next(iterator)
+                if not errInd and not errStat:
+                    self._log(f"[APPLY] {ip}: SET contention_slots=4 OK (OID {label})", "info")
+                    return True, "OK"
+                self._log(f"[APPLY] {ip}: OID {label} falló ({errInd or errStat})", "warning")
+            except Exception as e:
+                self._log(f"[APPLY] {ip}: Excepción contention OID {label} — {e}", "warning")
+
+        return False, "FALLÓ SET contention_slots en todos los OIDs"
+
+    def set_broadcast_retry(self, ip: str) -> Tuple[bool, str]:
+        """SET broadcastRetryCount.0 = 0 (hardcoded, OBLIGATORIO).
+
+        Evita saturar la bajada con paquetes repetidos en redes CCTV.
+        Por defecto el equipo usa 2 (3 envíos totales). Se fija en 0.
+
+        OID: .1.3.6.1.4.1.161.19.3.1.1.35.0 (broadcastRetryCount.0, Integer)
+
+        Args:
+            ip: AP IP address.
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        BROADCAST_OID = "1.3.6.1.4.1.161.19.3.1.1.35.0"  # broadcastRetryCount.0
+        VALUE = 0
+
+        self._log(f"[APPLY] {ip}: SET broadcastRetryCount = {VALUE}", "info")
+        try:
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(self.write_community, mpModel=1),
+                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                ContextData(),
+                ObjectType(ObjectIdentity(BROADCAST_OID), Integer32(VALUE)),
+            )
+            errInd, errStat, _, _ = next(iterator)
+            if not errInd and not errStat:
+                self._log(f"[APPLY] {ip}: SET broadcastRetryCount=0 OK", "info")
+                return True, "OK"
+            msg = f"SNMP Error: {errInd or errStat.prettyPrint()}"
+            self._log(f"[APPLY] {ip}: FALLÓ set_broadcast_retry — {msg}", "error")
+            return False, msg
+        except Exception as e:
+            msg = str(e)
+            self._log(f"[APPLY] {ip}: Excepción set_broadcast_retry — {msg}", "error")
+            return False, msg
+
     def run_scan(self) -> Dict[str, Dict]:
         """
         Ejecutar Tower Scan (wrapper síncrono)
