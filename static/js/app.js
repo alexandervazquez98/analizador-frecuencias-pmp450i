@@ -470,27 +470,32 @@ function renderInstallationSheet(results) {
     // let recommendedBW = "N/A"; // This line was duplicated, removed.
 
     // Filtramos candidatos viables con suficiente throughput
-    const validCandidates = freqPool.filter(c =>
-        c.Estado === 'Viable' &&
-        (c['Throughput Est. (Mbps)'] || 0) >= requiredThroughput
-    );
+    // Soporte dual de keys: AP_ONLY usa 'Válido'='Sí', AP_SM_CROSS usa 'Estado'='Viable'
+    const validCandidates = freqPool.filter(c => {
+        const isViable = c.Estado === 'Viable' || c['Válido'] === 'Sí';
+        return isViable && (c['Throughput Est. (Mbps)'] || 0) >= requiredThroughput;
+    });
 
     // Si hay candidatos válidos, buscamos el óptimo
     if (validCandidates.length > 0) {
         // Ordenar primero por Ancho (ASCII sort works for 10, 20... wait, need numeric sort)
         // Ascendente en ancho, Descendente en Score
         validCandidates.sort((a, b) => {
-            const wa = a['Ancho (MHz)'] || 0;
-            const wb = b['Ancho (MHz)'] || 0;
+            // Soporte dual: keys largas (backend AP_ONLY) y cortas (backend AP_SM_CROSS)
+            const wa = a['Ancho Banda (MHz)'] ?? a['Ancho (MHz)'] ?? 0;
+            const wb = b['Ancho Banda (MHz)'] ?? b['Ancho (MHz)'] ?? 0;
             if (wa !== wb) return wa - wb; // Menor ancho primero
 
             // A igualdad de ancho, mejor score
-            return (b['Score Final'] || 0) - (a['Score Final'] || 0);
+            const sa = a['Puntaje Final'] ?? a['Score Final'] ?? 0;
+            const sb = b['Puntaje Final'] ?? b['Score Final'] ?? 0;
+            return sb - sa;
         });
 
         const best = validCandidates[0];
         const cap = best['Throughput Est. (Mbps)'] || 0;
-        const width = best['Ancho (MHz)'] || 0;
+        // Soporte dual de keys
+        const width = best['Ancho Banda (MHz)'] ?? best['Ancho (MHz)'] ?? 0;
 
         recommendedBW = `<span class="text-success fw-bold">${width} MHz</span> <small>(Soporta ${cap} Mbps > ${requiredThroughput} Mbps req.)</small>`;
     } else {
@@ -498,7 +503,7 @@ function renderInstallationSheet(results) {
         const bestFallback = freqPool.slice().sort((a, b) => (b['Throughput Est. (Mbps)'] || 0) - (a['Throughput Est. (Mbps)'] || 0))[0];
         if (bestFallback) {
             const cap = bestFallback['Throughput Est. (Mbps)'] || 0;
-            const width = bestFallback['Ancho (MHz)'] || 0;
+            const width = bestFallback['Ancho Banda (MHz)'] ?? bestFallback['Ancho (MHz)'] ?? 0;
             recommendedBW = `<span class="text-danger fw-bold">${width} MHz</span> <small>(Max Disp: ${cap} Mbps < ${requiredThroughput} Mbps req.)</small>`;
         }
     }
@@ -506,20 +511,26 @@ function renderInstallationSheet(results) {
     // 3. Renderizar vista
     let poolRows = topCandidates.map(f => {
         const throughput = f['Throughput Est. (Mbps)'] || 0;
-        const isViable = f.Estado === 'Viable' && throughput >= requiredThroughput;
+        // Dual-key support: AP_ONLY usa 'Válido'='Sí', AP_SM_CROSS usa 'Estado'='Viable'
+        const estadoLabel = f.Estado ?? (f['Válido'] === 'Sí' ? 'Viable' : 'No Viable');
+        const isViable = estadoLabel === 'Viable' && throughput >= requiredThroughput;
         const rowClass = isViable ? 'table-success' : '';
         const snr = f['SNR Estimado (dB)'] || 0;
+        // Dual-key: 'Frecuencia Central (MHz)' (AP_ONLY) vs 'Frecuencia (MHz)' (AP_SM_CROSS)
+        const freq = f['Frecuencia Central (MHz)'] ?? f['Frecuencia (MHz)'] ?? '—';
+        // Dual-key: 'Ancho Banda (MHz)' (AP_ONLY) vs 'Ancho (MHz)' (AP_SM_CROSS)
+        const ancho = f['Ancho Banda (MHz)'] ?? f['Ancho (MHz)'] ?? '—';
 
         return `
             <tr class="${rowClass}">
-                <td><strong>${f['Frecuencia (MHz)']}</strong></td>
-                <td>${f['Ancho (MHz)']} MHz</td>
+                <td><strong>${freq}</strong></td>
+                <td>${ancho} MHz</td>
                 <td>${throughput} Mbps</td>
                 <td class="${throughput >= requiredThroughput ? 'text-success' : 'text-danger'} fw-bold">
                     ${throughput >= requiredThroughput ? 'CUMPLE' : 'INSUFICIENTE'}
                 </td>
                 <td>${snr} dB</td>
-                <td><span class="badge bg-${f.Estado === 'Viable' ? 'success' : 'danger'}">${f.Estado}</span></td>
+                <td><span class="badge bg-${estadoLabel === 'Viable' ? 'success' : 'danger'}">${estadoLabel}</span></td>
             </tr>
         `;
     }).join('');
