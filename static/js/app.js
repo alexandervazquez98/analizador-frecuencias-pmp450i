@@ -634,9 +634,11 @@ function renderAPCard(ip, analysis) {
             if (scanId) {
                 // Rango dinámico y ranking del combined_ranking del AP (AP_SM_CROSS)
                 const ranking = analysis.combined_ranking || [];
-                const freqs = ranking.map(f => f.frequency || f['Frecuencia Central (MHz)']).filter(Boolean);
-                const recBw = best.channel_width || 20;
+                // AP_SM_CROSS usa 'Frecuencia (MHz)', AP_ONLY usa 'Frecuencia Central (MHz)'
+                const freqs = ranking.map(f => f.frequency || f['Frecuencia (MHz)'] || f['Frecuencia Central (MHz)']).filter(Boolean);
+                const recBw = best.channel_width || best.bandwidth || 20;
                 const rankingJson = escapeAttr(JSON.stringify(ranking.slice(0, 20)));
+
                 // freqMin/freqMax defensivos — evita Math.min([]) = Infinity con 0 freq
                 const freqMin = freqs.length ? Math.min(...freqs) : (best.frequency - 200) || 3400;
                 const freqMax = freqs.length ? Math.max(...freqs) : (best.frequency + 200) || 6000;
@@ -1298,9 +1300,10 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
         freqSelect.appendChild(opt);
     } else {
         top20.forEach((item, idx) => {
-            const fMhz = item.frequency ?? item['Frecuencia Central (MHz)'];
-            const score = item.combined_score ?? item['Puntaje Final'] ?? item.score ?? '';
-            const bw = item.channel_width ?? item['Ancho Banda (MHz)'] ?? '';
+            const fMhz = item.frequency ?? item['Frecuencia (MHz)'] ?? item['Frecuencia Central (MHz)'];
+            const score = item.combined_score ?? item['Score Final'] ?? item['Puntaje Final'] ?? item.score ?? '';
+            const bw = item.channel_width ?? item['Ancho (MHz)'] ?? item['Ancho Banda (MHz)'] ?? '';
+
             const isRec = fMhz == freqMhz;
             const label = isRec
                 ? `★ ${fMhz} MHz — ${bw ? bw + 'MHz BW | ' : ''}Score: ${score} (Recomendada)`
