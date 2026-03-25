@@ -840,61 +840,47 @@ class TowerScanner:
         """SET channel bandwidth on AP via SNMP.
 
         OID priority (confirmed by Cambium MIB field testing):
-          1. .1.3.6.1.4.1.161.19.3.3.2.83.0  — channelBandwidth.0 (OctetString, WRITABLE)
+          1. .1.3.6.1.4.1.161.19.3.3.2.83.0  — channelBandwidth.0 (OctetString)
              Format: "5.0 MHz", "7.0 MHz", "10.0 MHz", "20.0 MHz", etc.
           2. .1.3.6.1.4.1.161.19.3.3.2.91.0  — bandwidth.0 (Integer fallback)
-             3 GHz map: 1=5, 2=7, 3=10, 4=15, 5=20, 6=30, 7=40
-             4/5 GHz map: 1=5, 2=10, 3=15, 4=20, 5=30, 6=40
 
-        IMPORTANT: Integer maps differ between 3 GHz and 4/5 GHz hardware.
-        The 3 GHz enum has an extra '7 MHz' slot at position 2.
-        Pass ap_freq_mhz (from scan results) to avoid GET overhead.
+        IMPORTANT — Universal Integer map (all Cambium PMP450i hardware):
+          1=5MHz, 2=7MHz, 3=10MHz, 4=15MHz, 5=20MHz, 6=30MHz, 7=40MHz
+          The 7MHz slot exists in ALL firmware enum tables regardless of band.
+          Band only restricts which values are VALID to select — not the enum.
+          7MHz is physically only available on 3GHz hardware (band 3000-3900 MHz).
 
         NOTE: OID 221.0 is SPECTRUM_ACTION_OID — do NOT use for channel bandwidth.
 
         Args:
             ip:          AP IP address.
             width_mhz:   Channel width in MHz (5, 7, 10, 15, 20, 30 or 40).
-            ap_freq_mhz: AP operating frequency in MHz to detect band (optional).
-                         If None, a SNMP GET is performed to detect the band.
+            ap_freq_mhz: Kept for API compatibility — not used for band detection.
 
         Returns:
             Tuple (success: bool, message: str).
         """
-        # ── Band detection ──────────────────────────────────────────
-        if ap_freq_mhz is None:
-            # Fallback: GET current rfFreqCarrier to detect band
-            ok, raw, _ = self._snmp_get(ip=ip, oid=self.RF_FREQ_CARRIER_OID)
-            try:
-                ap_freq_mhz = int(raw) / 1000.0 if ok and raw else None
-            except (TypeError, ValueError):
-                ap_freq_mhz = None
+        # ── Universal Integer map (all PMP450i firmware) ─────────────
+        # 7MHz occupies position 2 on ALL hardware — band only restricts UI selection
+        BW_INT_MAP = {5: 1, 7: 2, 10: 3, 15: 4, 20: 5, 30: 6, 40: 7}
+        valid_bws = list(BW_INT_MAP.keys())
 
-        # 3 GHz band: 3000–3900 MHz — has 7 MHz as extra slot at position 2
-        is_3ghz = ap_freq_mhz is not None and 3000 <= ap_freq_mhz < 3900
-
-        # ── Integer maps per band ─────────────────────────────────────
-        BW_INT_MAP_3GHZ = {5: 1, 7: 2, 10: 3, 15: 4, 20: 5, 30: 6, 40: 7}
-        BW_INT_MAP_5GHZ = {5: 1, 10: 2, 15: 3, 20: 4, 30: 5, 40: 6}
-        bw_int_map = BW_INT_MAP_3GHZ if is_3ghz else BW_INT_MAP_5GHZ
-        valid_bws = list(bw_int_map.keys())
-
-        bw_int = bw_int_map.get(int(width_mhz))
+        bw_int = BW_INT_MAP.get(int(width_mhz))
         if bw_int is None:
             return False, (
-                f"Ancho de canal {width_mhz} MHz no soportado para banda "
-                f"{'3GHz' if is_3ghz else '4/5GHz'}. Válidos: {valid_bws}"
+                f"Ancho de canal {width_mhz} MHz no soportado. "
+                f"Válidos: {valid_bws}"
             )
 
         # OID 1: OctetString — único con SET confirmado por Cambium
         CHANNEL_BW_OID_STR = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
-        # OID 2: Integer fallback — requiere mapa correcto por banda
+        # OID 2: Integer fallback — mapa universal
         CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
         bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz", "7.0 MHz", etc.
 
         self._log(
             f"[APPLY] {ip}: SET channelBandwidth = {width_mhz} MHz "
-            f"(banda={'3GHz' if is_3ghz else '4/5GHz'} str='{bw_str}' int={bw_int})",
+            f"(str='{bw_str}', int={bw_int})",
             "info",
         )
 
@@ -911,11 +897,11 @@ class TowerScanner:
             )
             return True, "OK"
         self._log(
-            f"[APPLY] {ip}: OID .83.0 falló ({msg}) — probando Integer .91.0 (banda={'3GHz' if is_3ghz else '4/5GHz'})",
+            f"[APPLY] {ip}: OID .83.0 falló ({msg}) — probando Integer .91.0 (universal map)",
             "warning",
         )
 
-        # Try 2: Integer OID .91.0 (fallback) con mapa correcto de banda
+        # Try 2: Integer OID .91.0 (fallback) — mapa universal todos los PMP450i
         try:
             iterator = setCmd(
                 SnmpEngine(),
@@ -928,7 +914,7 @@ class TowerScanner:
             if not errInd and not errStat:
                 self._log(
                     f"[APPLY] {ip}: SET channelBandwidth={width_mhz}MHz OK "
-                    f"(OID .91.0 int={bw_int} banda={'3GHz' if is_3ghz else '4/5GHz'})",
+                    f"(OID .91.0 int={bw_int} universal map)",
                     "warning",
                 )
                 return True, "OK (via .91.0)"
