@@ -658,6 +658,23 @@ function renderAPCard(ip, analysis) {
                 <small>Score: ${best['Puntaje Final']} | SNR Est: ${best['SNR Estimado (dB)']} dB</small>
             </div>
         `;
+
+        // Botón apply para modo AP_ONLY — mismo flujo que AP_SM_CROSS
+        if (!isViewer) {
+            const scanId = appState.currentScanId || (appState.scanResults && appState.scanResults.scan_id);
+            if (scanId && best['Frecuencia Central (MHz)']) {
+                // Normalizar score a 0-1 (Puntaje Final es int, max teórico ~200)
+                const scoreNorm = ((best['Puntaje Final'] || 0) / 200).toFixed(2);
+                const isViableAP = best['Válido'] === 'Sí';
+                applyBtn = `
+                    <button type="button" class="btn btn-warning btn-sm ms-2"
+                        id="applyBtn-${ip.replace(/\./g, '-')}"
+                        onclick="openApplyModal('${escapeAttr(scanId)}', '${escapeAttr(ip)}', ${best['Frecuencia Central (MHz)']}, ${scoreNorm}, ${isViableAP})"
+                        title="Aplicar frecuencia óptima vía SNMP">
+                        <i class="bi bi-lightning-charge-fill"></i> Aplicar Frec.
+                    </button>`;
+            }
+        }
     } else {
         bestFreqInfo = '<div class="alert alert-warning">No se encontraron frecuencias válidas.</div>';
     }
