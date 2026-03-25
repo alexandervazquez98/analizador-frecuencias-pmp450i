@@ -100,18 +100,43 @@ class FrequencyApplyManager:
         # 2. Viability gate (unless force=True)
         if not force:
             results = scan.get("results") or {}
-            best = results.get("best_combined_frequency") or {}
-            is_viable = best.get("is_viable", False)
-            combined_score = best.get("combined_score", 0.0)
 
-            if not is_viable:
+            # AP_SM_CROSS mode: combined score + is_viable
+            best_combined = results.get("best_combined_frequency") or {}
+
+            # AP_ONLY mode: per-AP best_frequency inside analysis_results
+            # Pick the first AP's best_frequency as the gate signal
+            best_ap = {}
+            analysis_results = results.get("analysis_results") or {}
+            for ap_data in analysis_results.values():
+                if isinstance(ap_data, dict) and ap_data.get("best_frequency"):
+                    best_ap = ap_data["best_frequency"]
+                    break
+
+            if best_combined:
+                # AP_SM_CROSS path
+                is_viable = best_combined.get("is_viable", False)
+                combined_score = best_combined.get("combined_score", 0.0)
+                if not is_viable:
+                    raise ValueError(
+                        "Analysis not viable. Use force=true to override."
+                    )
+                if combined_score < _VIABILITY_SCORE_THRESHOLD:
+                    raise ValueError(
+                        f"combined_score {combined_score:.2f} is below threshold "
+                        f"{_VIABILITY_SCORE_THRESHOLD}. Use force=true to override."
+                    )
+            elif best_ap:
+                # AP_ONLY path — 'Válido'='Sí' is the viability signal
+                is_viable_ap = best_ap.get("Válido") == "Sí" or best_ap.get("is_optimal", False)
+                if not is_viable_ap:
+                    raise ValueError(
+                        "Analysis not viable (AP_ONLY). Use force=true to override."
+                    )
+            else:
+                # No analysis results at all — block unless force
                 raise ValueError(
-                    "Analysis not viable. Use force=true to override."
-                )
-            if combined_score < _VIABILITY_SCORE_THRESHOLD:
-                raise ValueError(
-                    f"combined_score {combined_score:.2f} is below threshold "
-                    f"{_VIABILITY_SCORE_THRESHOLD}. Use force=true to override."
+                    "No analysis results found in scan. Use force=true to override."
                 )
 
         # 3. Extract SM IPs from scan record

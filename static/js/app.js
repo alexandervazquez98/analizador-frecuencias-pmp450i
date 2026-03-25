@@ -1181,7 +1181,7 @@ function _ensureApplyModal() {
             <div id="applyModalBadges" style="margin-bottom:1rem;display:flex;gap:.5rem;flex-wrap:wrap;"></div>
             <div style="margin-bottom:.75rem;">
                 <label for="applyInputFreq" style="font-size:.85rem;color:#aaa;">Frecuencia (MHz)</label>
-                <input type="number" id="applyInputFreq" step="0.5" min="4900" max="6000"
+                <input type="number" id="applyInputFreq" step="0.5" min="3400" max="6000"
                     style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:1rem;">
             </div>
             <div style="margin-bottom:.75rem;">
@@ -1274,8 +1274,8 @@ async function submitApplyFrequency() {
     if (_applyModal.submitting) return;
 
     const freqMhz = parseFloat(document.getElementById('applyInputFreq').value);
-    if (!freqMhz || freqMhz < 4900 || freqMhz > 6000) {
-        showApplyResult('danger', 'Frecuencia invalida. Debe estar entre 4900 y 6000 MHz.');
+    if (!freqMhz || freqMhz < 3400 || freqMhz > 6000) {
+        showApplyResult('danger', 'Frecuencia invalida. Debe estar entre 3400 y 6000 MHz.');
         return;
     }
 

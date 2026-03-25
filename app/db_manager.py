@@ -339,6 +339,9 @@ CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
         Returns:
             The new row ID (integer).
         """
+        # Normalize tower_id: empty string → None (FK allows NULL via ON DELETE SET NULL)
+        tower_id_val = tower_id if tower_id and tower_id.strip() else None
+
         conn = self.get_connection()
         try:
             cursor = conn.execute(
@@ -347,7 +350,7 @@ CREATE INDEX IF NOT EXISTS idx_freq_applies_status ON frequency_applies(state);
                     freq_khz, prev_freq_khz, channel_width, state)
                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
                 (
-                    tower_id,
+                    tower_id_val,
                     scan_id,
                     applied_by,
                     applied_by_username,
