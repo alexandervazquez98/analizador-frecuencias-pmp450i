@@ -624,7 +624,7 @@ function renderAPCard(ip, analysis) {
         bestFreqInfo = `
             <div class="alert alert-${color} mb-2">
                 <strong><i class="bi bi-star-fill"></i> Mejor Frecuencia: ${best.frequency} MHz</strong><br>
-                <small>Score Combinado: ${best.combined_score} | Ruido Promedio SMs: ${best.sm_avg_noise.toFixed(1)} dBm</small>
+                <small>Score Combinado: ${best.combined_score != null ? Number(best.combined_score).toFixed(2) : 'N/A'} | Ruido Promedio SMs: ${best.sm_avg_noise != null ? Number(best.sm_avg_noise).toFixed(1) : 'N/A'} dBm</small>
             </div>
         `;
 
@@ -635,10 +635,12 @@ function renderAPCard(ip, analysis) {
                 // Rango dinámico y ranking del combined_ranking del AP (AP_SM_CROSS)
                 const ranking = analysis.combined_ranking || [];
                 const freqs = ranking.map(f => f.frequency || f['Frecuencia Central (MHz)']).filter(Boolean);
-                const freqMin = freqs.length ? Math.min(...freqs) : 3400;
-                const freqMax = freqs.length ? Math.max(...freqs) : 6000;
                 const recBw = best.channel_width || 20;
                 const rankingJson = escapeAttr(JSON.stringify(ranking.slice(0, 20)));
+                // freqMin/freqMax defensivos — evita Math.min([]) = Infinity con 0 freq
+                const freqMin = freqs.length ? Math.min(...freqs) : (best.frequency - 200) || 3400;
+                const freqMax = freqs.length ? Math.max(...freqs) : (best.frequency + 200) || 6000;
+
                 applyBtn = `
                     <button type="button" class="btn btn-warning btn-sm ms-2"
                         id="applyBtn-${ip.replace(/\./g, '-')}"
