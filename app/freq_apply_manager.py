@@ -242,7 +242,11 @@ class FrequencyApplyManager:
         # ── Step 4b: SET channel_width (opcional, si se provee) ───────────
         channel_width_result = None
         if channel_width and ap_success:
-            bw_success, bw_msg = self._scanner.set_channel_width(ap_ip, channel_width)
+            # Pasar freq_mhz para detectar banda (3GHz vs 4/5GHz) sin GET extra
+            ap_freq_mhz = freq_khz / 1000.0  # freq_khz ya está en kHz
+            bw_success, bw_msg = self._scanner.set_channel_width(
+                ap_ip, channel_width, ap_freq_mhz=ap_freq_mhz
+            )
             channel_width_result = {"success": bw_success, "error": bw_msg if not bw_success else None}
             if bw_success:
                 logger.info("[APPLY %d] AP %s: channelBandwidth=%d MHz OK", apply_id, ap_ip, channel_width)
