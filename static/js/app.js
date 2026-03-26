@@ -8,7 +8,10 @@ const appState = {
     currentScanId: null,
     pollInterval: null,
     scanResults: null,
-    lastLogCount: 0
+    lastLogCount: 0,
+    // Log auto-scroll state (T4 — frontend-responsive-ux)
+    logUserScrolled: false,  // true si el usuario scrolleó hacia arriba
+    logNewLinesCount: 0,     // líneas nuevas pendientes de ver
 };
 
 // Referencias a elementos DOM
@@ -81,7 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
         spectrumViewerPlaceholder: document.getElementById('spectrumViewerPlaceholder'),
 
         // Recent Scans
-        recentScans: document.getElementById('recentScans')
+        recentScans: document.getElementById('recentScans'),
+
+        // Log badge (T4 — frontend-responsive-ux)
+        logNewLinesBadge: document.getElementById('logNewLinesBadge'),
     };
 
     // Configurar event listeners
@@ -176,6 +182,47 @@ function setupEventListeners() {
         if (elements.importModal && event.target == elements.importModal) {
             elements.importModal.style.display = "none";
         }
+    };
+
+    // Log scroll listener — detecta si el usuario scrolló hacia arriba
+    if (elements.logOutput) {
+        elements.logOutput.addEventListener('scroll', () => {
+            if (isLogAtBottom()) {
+                // Usuario volvió al fondo — reanudar auto-scroll y ocultar badge
+                appState.logUserScrolled = false;
+                appState.logNewLinesCount = 0;
+                updateLogBadge(0);
+            } else {
+                // Usuario scrolló hacia arriba
+                appState.logUserScrolled = true;
+            }
+        });
+    }
+}
+
+// ==================== LOG HELPERS (T4 — frontend-responsive-ux) ====================
+
+/**
+ * Devuelve true si el panel de log está scrolleado al fondo (threshold: 10px).
+ * O(1) — no usa observers.
+ */
+function isLogAtBottom() {
+    if (!elements.logOutput) return true;
+    const el = elements.logOutput;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - 10;
+}
+
+/**
+ * Actualiza la visibilidad y texto del badge #logNewLinesBadge.
+ * @param {number} count — 0 para ocultar el badge.
+ */
+function updateLogBadge(count) {
+    if (!elements.logNewLinesBadge) return;
+    if (count <= 0) {
+        elements.logNewLinesBadge.style.display = 'none';
+    } else {
+        elements.logNewLinesBadge.textContent = `${count} nueva${count > 1 ? 's' : ''}`;
+        elements.logNewLinesBadge.style.display = 'inline-block';
     }
 }
 
@@ -806,7 +853,14 @@ function addLogEntry(msg, type = 'info', detailed = false) {
     div.className = `${color} mb-1`;
     div.innerHTML = `<small class="text-muted">[${new Date().toLocaleTimeString()}]</small> ${msg}`;
     elements.logOutput.appendChild(div);
-    elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
+
+    // Auto-scroll inteligente — solo si el usuario no ha scrolleado hacia arriba
+    if (!appState.logUserScrolled) {
+        elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
+    } else {
+        appState.logNewLinesCount++;
+        updateLogBadge(appState.logNewLinesCount);
+    }
 }
 
 function resetInterface() {
@@ -819,6 +873,10 @@ function resetInterface() {
     appState.currentScanId = null;
     appState.scanResults = null;
     appState.lastLogCount = 0;
+    // Reset log scroll state
+    appState.logUserScrolled = false;
+    appState.logNewLinesCount = 0;
+    updateLogBadge(0);
 
     // Hide results and status panels, show empty state
     if (elements.resultsPanel) elements.resultsPanel.style.display = 'none';
