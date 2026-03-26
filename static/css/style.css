@@ -27,7 +27,7 @@
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--font-primary);
     background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
     color: var(--text-light);
     line-height: 1.6;
@@ -765,22 +765,61 @@ details summary:hover {
     overflow-x: auto;
 }
 
-/* Scrollbar */
+/* Scrollbar — Cross-browser
+   Webkit (Chrome, Edge Chromium, Safari): full custom styling
+   Firefox / W3C: scrollbar-width + scrollbar-color
+   Edge Legacy (EdgeHTML): native fallback — no extra code needed */
 ::-webkit-scrollbar {
-    width: 10px;
+    width: 8px;
+    height: 8px; /* horizontal scrollbars */
 }
 
 ::-webkit-scrollbar-track {
     background: var(--dark-bg);
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
     background: var(--primary-color);
-    border-radius: 5px;
+    border-radius: 4px;
+    border: 2px solid var(--dark-bg); /* breathing room around thumb */
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: #1976D2;
+}
+
+/* Firefox + Chrome 121+ (W3C Scrollbars Level 1) */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-color) var(--dark-bg);
+}
+
+/* Micro-animaciones en cards — feedback táctil */
+.card {
+    transition: box-shadow var(--transition-speed) ease,
+                transform var(--transition-speed) ease;
+}
+
+.card:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transform: translateY(-1px);
+}
+
+/* Badge de nuevas líneas en el log */
+#logNewLinesBadge {
+    transition: opacity var(--transition-speed) ease;
+    cursor: pointer;
+}
+
+/* Accesibilidad: sin animaciones si el usuario lo prefiere */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition: none !important;
+        animation: none !important;
+    }
 }
 
 /* Estilos para Análisis Cruzado AP-SM */
