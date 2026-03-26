@@ -666,13 +666,15 @@ details summary:hover {
    - Mobile/tablet: natural scroll flow, altura auto en todos los paneles.
    ============================================================ */
 
-/* Desktop: scrollable layout — cada panel gestiona su propio overflow */
+/* Desktop: independent column scroll (Gmail/Slack pattern)
+   main-container contiene el viewport (overflow:hidden)
+   cada .col-scan-responsive scrollea de forma independiente (overflow-y:auto)
+   El header de navegacion siempre queda fijo y visible */
 @media (min-width: 768px) {
     .main-container {
         height: 100vh;
-        /* overflow:auto como safety net — si algo escapa al layout, el viewport scrollea
-           en lugar de cortar silenciosamente el contenido (fix vs. overflow:hidden) */
-        overflow: auto;
+        /* overflow:hidden — el scroll ocurre por columna, NO a nivel de pagina */
+        overflow: hidden;
     }
 
     .tab-content-responsive {
@@ -690,6 +692,8 @@ details summary:hover {
 
     .col-scan-responsive {
         height: 100%;
+        /* Cada columna scrollea independientemente — no afecta a la otra columna */
+        overflow-y: auto;
     }
 
     /* Log panel: altura mínima garantizada en desktop */
