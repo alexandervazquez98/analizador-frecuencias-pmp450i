@@ -5,9 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tower Scan - PMP 450i Analyzer</title>
+    <!-- Inter font — primary UI typeface (fallback: system-ui para entornos offline) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Bootstrap -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=10">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=14">
 </head>
 
 <body>
@@ -119,7 +124,13 @@
                         <div class="card shadow-sm border-0 flex-fill d-flex flex-column"
                             style="background: var(--card-bg); min-height: 0;">
                             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0 small"><i class="bi bi-terminal-fill"></i> Log de Ejecución</h6>
+                                <h6 class="mb-0 small">
+                                    <i class="bi bi-terminal-fill"></i> Log de Ejecución
+                                    <span id="logNewLinesBadge"
+                                          class="badge bg-warning text-dark ms-2"
+                                          style="display:none; font-size:0.65rem;"
+                                          title="Nuevas entradas en el log">0 nuevas</span>
+                                </h6>
                                 <div class="form-check form-switch mb-0">
                                     <input class="form-check-input form-check-input-sm" type="checkbox" id="detailedLogToggle">
                                     <label class="form-check-label text-muted small" style="font-size: 0.7rem;"
@@ -128,6 +139,7 @@
                             </div>
                             <div class="card-body p-0 d-flex flex-column">
                                 <div id="logOutput" class="p-2 small font-monospace text-light flex-grow-1"
+                                    role="log" aria-live="polite" aria-label="Log de ejecución del escaneo"
                                     style="overflow-y: auto; background: #1a1a1a;"></div>
                             </div>
                         </div>
@@ -232,7 +244,7 @@
                                     </div>
                                 </div>
                                 <div class="card-body overflow-auto">
-                                    <div id="resultsSummary" class="mb-4"></div>
+                                <div id="resultsSummary" class="table-responsive mb-4"></div>
 
                                     <ul class="nav nav-tabs mb-3" id="resultsTabs" role="tablist">
                                         <li class="nav-item" role="presentation">
@@ -255,7 +267,9 @@
 
                                     <div class="tab-content" id="resultsContent">
                                         <div class="tab-pane fade show active" id="recommendations-pane" role="tabpanel">
-                                            <div id="frequencyRecommendations"></div>
+                                            <div class="table-responsive">
+                                                <div id="frequencyRecommendations"></div>
+                                            </div>
                                         </div>
                                         <div class="tab-pane fade" id="installation-pane" role="tabpanel">
                                             <div id="installationSheetContent"></div>
@@ -537,7 +551,7 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=13"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=14"></script>
     <script src="{{ url_for('static', filename='js/towers.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='js/users.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='js/history.js') }}?v=1"></script>

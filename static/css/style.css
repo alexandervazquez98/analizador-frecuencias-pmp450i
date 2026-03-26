@@ -12,6 +12,12 @@
     --text-muted: #aaa;
     --border-color: #0f3460;
     --shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+
+    /* Layout — alturas de componentes clave (ajustables via env/breakpoint) */
+    --log-min-height: 200px;
+    --log-max-height-mobile: 200px;
+    --transition-speed: 150ms;
+    --font-primary: 'Inter', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
 }
 
 * {
@@ -21,7 +27,7 @@
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--font-primary);
     background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
     color: var(--text-light);
     line-height: 1.6;
@@ -167,14 +173,6 @@ input[type="file"]::-webkit-file-upload-button {
 }
 
 /* Buttons */
-.button-group {
-    display: flex;
-    gap: 15px;
-    flex-wrap: wrap;
-    margin-top: 20px;
-}
-
-/* Button group layout helper (non-Bootstrap) */
 .button-group {
     display: flex;
     gap: 15px;
@@ -660,16 +658,21 @@ details summary:hover {
 }
 
 /* ============================================================
-   RESPONSIVE LAYOUT — change-006
-   Strategy: desktop keeps fixed-height flex layout (vh-100);
-   tablet/mobile switches to natural scroll flow.
+   RESPONSIVE LAYOUT — change-007 (frontend-responsive-ux)
+   Strategy:
+   - Desktop: main-container scrollable (overflow:auto) como safety net.
+     Cada panel controla su propio scroll via .card-body overflow-y:auto.
+     El log tiene altura mínima garantizada via --log-min-height.
+   - Mobile/tablet: natural scroll flow, altura auto en todos los paneles.
    ============================================================ */
 
-/* Desktop: full-height fixed layout */
+/* Desktop: scrollable layout — cada panel gestiona su propio overflow */
 @media (min-width: 768px) {
     .main-container {
         height: 100vh;
-        overflow: hidden;
+        /* overflow:auto como safety net — si algo escapa al layout, el viewport scrollea
+           en lugar de cortar silenciosamente el contenido (fix vs. overflow:hidden) */
+        overflow: auto;
     }
 
     .tab-content-responsive {
@@ -688,9 +691,14 @@ details summary:hover {
     .col-scan-responsive {
         height: 100%;
     }
+
+    /* Log panel: altura mínima garantizada en desktop */
+    #logOutput {
+        min-height: var(--log-min-height);
+    }
 }
 
-/* Mobile / tablet: natural scroll, no height constraints */
+/* Mobile / tablet (<768px): natural scroll flow */
 @media (max-width: 767.98px) {
     .main-container {
         min-height: 100vh;
@@ -729,9 +737,9 @@ details summary:hover {
         min-height: 300px;
     }
 
-    /* Log output: smaller on mobile */
+    /* Log output: altura máxima limitada en mobile con scroll */
     #logOutput {
-        max-height: 200px;
+        max-height: var(--log-max-height-mobile);
         min-height: 80px;
     }
 
@@ -757,22 +765,61 @@ details summary:hover {
     overflow-x: auto;
 }
 
-/* Scrollbar */
+/* Scrollbar — Cross-browser
+   Webkit (Chrome, Edge Chromium, Safari): full custom styling
+   Firefox / W3C: scrollbar-width + scrollbar-color
+   Edge Legacy (EdgeHTML): native fallback — no extra code needed */
 ::-webkit-scrollbar {
-    width: 10px;
+    width: 8px;
+    height: 8px; /* horizontal scrollbars */
 }
 
 ::-webkit-scrollbar-track {
     background: var(--dark-bg);
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
     background: var(--primary-color);
-    border-radius: 5px;
+    border-radius: 4px;
+    border: 2px solid var(--dark-bg); /* breathing room around thumb */
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: #1976D2;
+}
+
+/* Firefox + Chrome 121+ (W3C Scrollbars Level 1) */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-color) var(--dark-bg);
+}
+
+/* Micro-animaciones en cards — feedback táctil */
+.card {
+    transition: box-shadow var(--transition-speed) ease,
+                transform var(--transition-speed) ease;
+}
+
+.card:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transform: translateY(-1px);
+}
+
+/* Badge de nuevas líneas en el log */
+#logNewLinesBadge {
+    transition: opacity var(--transition-speed) ease;
+    cursor: pointer;
+}
+
+/* Accesibilidad: sin animaciones si el usuario lo prefiere */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition: none !important;
+        animation: none !important;
+    }
 }
 
 /* Estilos para Análisis Cruzado AP-SM */
