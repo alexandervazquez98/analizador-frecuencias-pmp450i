@@ -63,4 +63,8 @@ def get_scan_defaults() -> dict:
             os.environ.get("DEFAULT_MAX_POLARIZATION_DIFF", "5")
         ),
         "channel_width": int(os.environ.get("DEFAULT_CHANNEL_WIDTH", "20")),
+        # Ancho de canal mínimo permitido en el análisis multibanda.
+        # El sistema no recomendará BWs menores a este valor.
+        # Operativamente usar 15 MHz como piso (latencia + headroom de capacidad).
+        "min_channel_width": int(os.environ.get("MIN_CHANNEL_WIDTH", "15")),
     }

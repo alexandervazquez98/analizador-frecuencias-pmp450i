@@ -76,18 +76,27 @@ class APSMCrossAnalyzer:
         self,
         ap_spectrum: List[SpectrumPoint],
         sm_data: List[SMSpectrumData],
-        top_n: int = 5
+        top_n: int = 5,
+        min_channel_width: int = 15,
     ) -> Tuple[pd.DataFrame, List[CrossAnalysisResult]]:
         """
-        Analizar MÚLTIPLES anchos de banda (20, 15, 10, 5 MHz)
-        Devuelve el ranking consolidado
+        Analizar MÚLTIPLES anchos de banda >= min_channel_width.
+
+        Args:
+            min_channel_width: BW mínimo a evaluar (default 15 MHz).
+                BWs menores son ignorados — no se recomendarán canales
+                más angostos que este valor, independientemente de su score.
         """
         all_results = []
-        bandwidths = [20, 15, 10, 5]
-        
-        logger.info(f"Iniciando análisis multibanda para {len(sm_data)} SMs")
-        
-        
+        # Evaluar solo BWs dentro del rango operativo (>= min_channel_width)
+        all_bandwidths = [20, 15, 10, 5]
+        bandwidths = [bw for bw in all_bandwidths if bw >= min_channel_width]
+
+        logger.info(
+            f"Iniciando análisis multibanda para {len(sm_data)} SMs "
+            f"(BWs: {bandwidths} MHz, mínimo: {min_channel_width} MHz)"
+        )
+
         for bw in bandwidths:
             logger.info(f"--- Evaluando ancho de canal: {bw} MHz ---")
             try:
@@ -98,12 +107,12 @@ class APSMCrossAnalyzer:
                 all_results.extend(results)
             except Exception as e:
                 logger.error(f"Error analizando ancho {bw} MHz: {e}")
-            
+
         logger.info(f"Total candidatos multibanda: {len(all_results)}")
-        
+
         # Crear DataFrame consolidado
         df_combined = self._create_combined_dataframe(all_results)
-        
+
         return df_combined, all_results
     
     def analyze_ap_with_sms(
