@@ -385,7 +385,10 @@ class ScanTask:
 
                         df_combined, cross_results = (
                             cross_analyzer.analyze_multiband_ap_with_sms(
-                                ap_spectrum, sm_data, top_n=20
+                                ap_spectrum,
+                                sm_data,
+                                top_n=20,
+                                min_channel_width=self.config.get("min_channel_width", 15),
                             )
                         )
 

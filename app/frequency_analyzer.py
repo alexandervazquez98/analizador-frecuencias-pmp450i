@@ -105,13 +105,19 @@ class FrequencyAnalyzer:
     DEFAULT_CHANNEL_WIDTH = 20  # MHz - Ancho de banda por defecto
     SLIDING_STEP = 5  # MHz - Paso de la ventana deslizante
 
-    # Bonificaciones por Eficiencia Espectral (Priorizar canales pequeños)
+    # Bonificaciones por Eficiencia Espectral
+    # Lógica: preferir el menor BW que cumpla la demanda del sector.
+    # Rango operativo estándar: 15-20 MHz.
+    # BWs < 15 MHz solo se evalúan si min_channel_width lo permite
+    # explícitamente (ver config MIN_CHANNEL_WIDTH); en ese caso reciben
+    # penalización para que solo ganen si la calidad RF es significativamente
+    # superior a las opciones de 15-20 MHz.
     BW_EFFICIENCY_BONUS = {
-        5: 15,  # +15 puntos por usar solo 5 MHz
-        10: 10,  # +10 puntos por usar 10 MHz
-        15: 5,  # +5 puntos por usar 15 MHz
-        20: 0,  # Basal
-        30: -5,  # Penalizar uso excesivo
+        5:  -10,  # Penalización: solo usar si min_channel_width < 15 y no hay alternativa
+        10:  -5,  # Penalización leve: válido en escenarios muy congestionados
+        15:   5,  # Preferencia leve sobre 20 MHz (mismo throughput útil, menor huella espectral)
+        20:   0,  # Línea base
+        30:  -5,  # Penalizar uso excesivo de espectro
         40: -10,
     }
 

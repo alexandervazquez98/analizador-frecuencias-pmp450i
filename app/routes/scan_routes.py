@@ -199,6 +199,7 @@ def start_scan(audit_manager=None):
         config.setdefault("min_snr", defaults["min_snr"])
         config.setdefault("max_pol_diff", defaults["max_polarization_diff"])
         config.setdefault("channel_width", defaults["channel_width"])
+        config.setdefault("min_channel_width", defaults["min_channel_width"])
 
         scan_id = str(uuid.uuid4())
 
