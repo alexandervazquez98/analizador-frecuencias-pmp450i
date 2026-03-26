@@ -420,15 +420,20 @@ class ScanTask:
 
                         analysis_results[ap_ip] = {
                             "mode": "AP_SM_CROSS",
+                            # Bug fix #33-1: spectrum_points was missing in AP_SM_CROSS mode
+                            "spectrum_points": len(ap_spectrum),
                             "spectrum_data": {
                                 "ap": serialized_ap_spectrum,
                                 "sms": serialized_sm_spectrums,
                             },
                             "sm_count": len(sm_data),
                             "sm_ips": [sm.ip for sm in sm_data],
-                            "combined_ranking": df_combined.to_dict("records"),
+                            # Bug fix #33-2: limit combined_ranking to 50 to avoid
+                            # SQLite JSON truncation on very large result sets
+                            "combined_ranking": df_combined.to_dict("records")[:50],
                             "best_combined_frequency": {
                                 "frequency": best_combined.frequency,
+                                "bandwidth": best_combined.bandwidth,
                                 "ap_score": best_combined.ap_score,
                                 "combined_score": best_combined.combined_score,
                                 "sm_worst_noise": best_combined.sm_worst_noise,
