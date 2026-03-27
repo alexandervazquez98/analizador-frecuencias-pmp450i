@@ -115,29 +115,15 @@ class ScanTask:
                 errors,
             ) = await scanner_for_validation.validate_and_filter_devices()
 
-            # Separar errores de APs (fatales) vs SMs (no fatales)
-            # Un AP que no responde abortamos — no tiene sentido escanear sin AP.
-            # Un SM que no responde se omite y el scan degrada a AP_ONLY o
-            # AP_SM_CROSS con los SMs que sí respondieron.
-            ap_errors = {ip: msg for ip, msg in errors.items() if ip in self.ap_ips}
-            sm_errors = {ip: msg for ip, msg in errors.items() if ip in self.sm_ips}
-
-            if sm_errors:
-                self.log(
-                    f"[WARNING] {len(sm_errors)} SM(s) no accesibles via SNMP — "
-                    f"se omiten del escaneo (scan continúa con APs y SMs disponibles): "
-                    + ", ".join(sm_errors.keys()),
-                    "warning",
-                )
-
-            if ap_errors:
+            # Reportar errores de validacion
+            if errors:
                 error_details = "; ".join(
-                    [f"{ip}: {msg}" for ip, msg in ap_errors.items()]
+                    [f"{ip}: {msg}" for ip, msg in errors.items()]
                 )
                 error_msg = (
-                    f"Validacion fallida: {len(ap_errors)} AP(s) no responden "
-                    f"o tienen comunidad incorrecta. NO se iniciara el escaneo. "
-                    f"Detalles: {error_details}"
+                    f"Validacion fallida: {len(errors)} dispositivo(s) no responden "
+                    f"o tienen comunidad incorrecta. NO se iniciara el escaneo hasta "
+                    f"corregirlo. Detalles: {error_details}"
                 )
                 logger.error(f"[{self.scan_id}] {error_msg}")
                 raise Exception(error_msg)
@@ -147,10 +133,9 @@ class ScanTask:
                     "Ningun AP paso la validacion SNMP (verifique IPs y comunidad)"
                 )
 
-            # Proceder con dispositivos válidos
+            # Todos validos, proceder
             self.ap_ips = valid_aps
             self.sm_ips = valid_sms
-
 
             # ── Fase 0.5: Auto-discovery de SMs (ap-sm-autodiscovery) ──────────
             # Descubrir los SMs registrados en cada AP via SNMP WALK sobre linkTable.
