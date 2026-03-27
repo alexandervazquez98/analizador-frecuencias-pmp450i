@@ -1,8 +1,8 @@
 """
 tests/test_frontend_buttons.py — T55: Frontend Button Functionality Tests (change-006).
 
-Specification: change-006 — verify that the main index page renders critical
-button IDs, the emptyState panel, and that vestige elements are absent.
+Specification: change-006 + ap-sm-autodiscovery — verify that the main index page renders
+critical button IDs, panels, and that vestige/deprecated elements are absent.
 
 Scenarios:
   1.  GET / renders 200 for authenticated user
@@ -10,7 +10,7 @@ Scenarios:
   3.  clearBtn is present
   4.  newScanBtn is present
   5.  exportResultsBtn is present
-  6.  openImportModalBtn is present
+  6.  discoverBtn is present (replaces openImportModalBtn after ap-sm-autodiscovery)
   7.  globalSpectrumBtn is present
   8.  #emptyState panel is present (bug fix: was welcomePanel → null crash)
   9.  #statusPanel is present
@@ -22,7 +22,7 @@ Scenarios:
   15. VESTIGE ABSENT: decorative #stabilityOverSpeed checkbox removed
   16. VESTIGE ABSENT: chart.js CDN script tag removed (not used in index)
   17. #scanAlert feedback div is present
-  18. Import modal (#importModal) is present
+  18. Discovery section (#discoverySection) is present (replaces #importModal)
   19. Log output (#logOutput) is present
   20. snmpCommunity input is present
 """
@@ -67,9 +67,9 @@ class TestCriticalButtonsPresent:
         """GIVEN GET / THEN #exportResultsBtn button exists in HTML."""
         assert 'id="exportResultsBtn"' in self._html(authenticated_client)
 
-    def test_open_import_modal_btn_present(self, authenticated_client):
-        """GIVEN GET / THEN #openImportModalBtn button exists in HTML."""
-        assert 'id="openImportModalBtn"' in self._html(authenticated_client)
+    def test_discover_btn_present(self, authenticated_client):
+        """GIVEN GET / THEN #discoverBtn button exists in HTML (ap-sm-autodiscovery)."""
+        assert 'id="discoverBtn"' in self._html(authenticated_client)
 
     def test_global_spectrum_btn_present(self, authenticated_client):
         """GIVEN GET / THEN #globalSpectrumBtn button exists in HTML."""
@@ -102,9 +102,9 @@ class TestCriticalPanelsPresent:
         """GIVEN GET / THEN #logOutput div exists."""
         assert 'id="logOutput"' in self._html(authenticated_client)
 
-    def test_import_modal_present(self, authenticated_client):
-        """GIVEN GET / THEN #importModal exists."""
-        assert 'id="importModal"' in self._html(authenticated_client)
+    def test_discovery_section_present(self, authenticated_client):
+        """GIVEN GET / THEN #discoverySection exists (ap-sm-autodiscovery replaces importModal)."""
+        assert 'id="discoverySection"' in self._html(authenticated_client)
 
     def test_snmp_community_input_present(self, authenticated_client):
         """GIVEN GET / THEN #snmpCommunity input exists."""
