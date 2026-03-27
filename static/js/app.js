@@ -470,8 +470,15 @@ function renderInstallationSheet(results) {
     // Luego ordenarlos por Ancho de Banda (ASC) y luego por Score (DESC).
     let recommendedBW = "N/A";
 
-    // Filtrar Top 50 (User requested 50)
-    const topCandidates = freqPool.slice(0, 50);
+    // Filtrar Top 50 y ordenar: ancho ASC (5..40), luego score DESC
+    const topCandidates = freqPool.slice(0, 50).sort((a, b) => {
+        const wa = a['Ancho Banda (MHz)'] ?? a['Ancho (MHz)'] ?? 0;
+        const wb = b['Ancho Banda (MHz)'] ?? b['Ancho (MHz)'] ?? 0;
+        if (wa !== wb) return wa - wb;
+        const sa = a['Puntaje Final'] ?? a['Score Final'] ?? a['combined_score'] ?? 0;
+        const sb = b['Puntaje Final'] ?? b['Score Final'] ?? b['combined_score'] ?? 0;
+        return sb - sa;
+    });
 
     // Determinar mejor ancho de banda recomendado (Buscando el menor Ancho que cumpla)
     // Estrategia: Buscar en todo el pool (no solo top 15) candidatos VIABLES que cumplan con el requerimiento.
@@ -591,7 +598,7 @@ function renderInstallationSheet(results) {
             <div class="card-header border-light bg-secondary text-white">
                 <i class="bi bi-collection-fill"></i> Pool de Frecuencias Candidatas (Top 50) - Prioridad Menor Ancho
             </div>
-            <div class="table-responsive">
+            <div class="table-responsive" style="max-height:380px;overflow-y:auto;">
                 <table class="table table-dark table-hover table-sm mb-0 text-center align-middle">
                     <thead>
                         <tr>
