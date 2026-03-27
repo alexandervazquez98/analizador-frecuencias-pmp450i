@@ -67,17 +67,25 @@ def get_spectrum_for_viewer(scan_id, ap_ip):
         if not isinstance(ap_result, dict):
             return None
 
+        # Mapa ip → site_name para etiquetas del gráfico
+        sm_details = ap_result.get("sm_details", [])
+        sm_names = {
+            d["ip"]: d.get("site_name") or d["ip"]
+            for d in sm_details
+            if isinstance(d, dict) and d.get("ip")
+        }
+
         # AP_SM_CROSS: spectrum_data tiene ap y sms
         spec = ap_result.get("spectrum_data")
         if spec and isinstance(spec, dict):
             ap_points = spec.get("ap", [])
             sm_points = spec.get("sms", {})
             if ap_points or sm_points:
-                return {"ap": ap_points, "sms": sm_points}
+                return {"ap": ap_points, "sms": sm_points, "sm_names": sm_names}
 
         # AP_ONLY fallback: spectrum_data puede ser lista o dict con solo ap
         if isinstance(spec, list) and spec:
-            return {"ap": spec, "sms": {}}
+            return {"ap": spec, "sms": {}, "sm_names": {}}
 
         # Ultimo fallback: raw_spectrum (lista flat de {freq, noise})
         raw = ap_result.get("raw_spectrum", [])
@@ -86,7 +94,7 @@ def get_spectrum_for_viewer(scan_id, ap_ip):
                 {"frequency": p["freq"], "vertical": p["noise"], "horizontal": p["noise"]}
                 for p in raw
             ]
-            return {"ap": ap_points, "sms": {}}
+            return {"ap": ap_points, "sms": {}, "sm_names": {}}
 
         return None
 

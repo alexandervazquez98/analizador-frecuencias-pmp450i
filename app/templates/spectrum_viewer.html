@@ -116,8 +116,16 @@
         let markers = {}; // id -> value
 
         const CHART_COLORS = [
-            '#FF5722', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5',
-            '#00BCD4', '#009688', '#4CAF50', '#8BC34A', '#CDDC39'
+            '#00E5FF', // Cyan eléctrico
+            '#FF6D00', // Naranja neón
+            '#76FF03', // Verde lima brillante
+            '#E040FB', // Púrpura neón
+            '#FFD600', // Amarillo intenso
+            '#FF4081', // Rosa neón
+            '#40C4FF', // Azul cielo brillante
+            '#69FF47', // Verde neón
+            '#FF6E40', // Coral brillante
+            '#EA80FC', // Violeta neón
         ];
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -186,17 +194,18 @@
 
             // 2. SM Datasets
             if (spectrumData.sms) {
+                const smNames = spectrumData.sm_names || {};
                 let colorIdx = 0;
                 for (const [smIp, smPoints] of Object.entries(spectrumData.sms)) {
                     const color = CHART_COLORS[colorIdx % CHART_COLORS.length];
+                    const label = smNames[smIp] || smIp;
                     datasets.push({
-                        label: `SM ${smIp}`,
+                        label: label,
                         data: smPoints.map(p => ({ x: p.frequency, y: p.vertical })),
                         borderColor: color,
                         backgroundColor: 'transparent',
-                        borderWidth: 1.5,
+                        borderWidth: 2.5,
                         pointRadius: 0,
-                        borderDash: [5, 5],
                         tension: 0.1,
                         order: 1
                     });
