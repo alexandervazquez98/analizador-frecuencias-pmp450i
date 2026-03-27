@@ -4,557 +4,510 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tower Scan - PMP 450i Analyzer</title>
-    <!-- Inter font — primary UI typeface (fallback: system-ui para entornos offline) -->
+    <title>PMP450i Frequency Analyzer</title>
+    <meta name="description" content="Analizador de frecuencias SNMP para radios Cambium PMP450i — auto-discovery de SMs y análisis cruzado.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Bootstrap -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=15">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=16">
 </head>
 
 <body>
-    <!-- Inject user role for JS -->
     <script>window.userRole = "{{ session.get('role', 'operator') }}";</script>
 
-    <div class="container-fluid p-3 p-md-4 d-flex flex-column main-container">
-        <!-- Header -->
-        <header class="header mb-2 text-center position-relative" style="padding: 15px 20px;">
-            <div class="position-absolute top-0 end-0 p-3">
-                <span class="text-light me-2"><i class="bi bi-person-circle"></i> {{ session['user'] }}</span>
-                {% if session.get('role') == 'admin' %}
-                <span class="badge bg-danger me-2">Admin</span>
-                {% endif %}
-                <a href="/logout" class="btn btn-outline-light btn-sm">
-                    <i class="bi bi-box-arrow-right"></i> Salir
+    <div class="app-shell">
+
+        <!-- ── SIDEBAR ─────────────────────────────────────────────────── -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon"><i class="bi bi-broadcast"></i></div>
+                <div class="brand-text">
+                    <span class="brand-name">PMP450i</span>
+                    <span class="brand-sub">Frequency Analyzer</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" id="nav-scan" onclick="switchTab('scan')">
+                    <i class="bi bi-broadcast-pin"></i>
+                    <span>Escaneo</span>
+                </button>
+                <button class="nav-item" id="nav-towers" onclick="switchTab('towers'); renderTowersPanel()">
+                    <i class="bi bi-building"></i>
+                    <span>Torres</span>
+                </button>
+                <button class="nav-item" id="nav-users" id="navUsersBtn" style="display:none;" onclick="switchTab('users'); renderUsersPanel()">
+                    <i class="bi bi-people"></i>
+                    <span>Usuarios</span>
+                </button>
+                <button class="nav-item" id="nav-history" onclick="switchTab('history'); renderHistoryPanel()">
+                    <i class="bi bi-clock-history"></i>
+                    <span>Historial</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <i class="bi bi-person-circle"></i>
+                    <div>
+                        <div class="user-name">{{ session['user'] }}</div>
+                        {% if session.get('role') == 'admin' %}
+                        <div class="user-role admin">Admin</div>
+                        {% else %}
+                        <div class="user-role">Operador</div>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="/logout" class="btn-logout" title="Cerrar sesión">
+                    <i class="bi bi-box-arrow-right"></i>
                 </a>
             </div>
-        </header>
+        </aside>
 
-        <!-- Main Navigation Tabs -->
-        <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
-            <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="tab-scan" data-bs-toggle="tab" data-bs-target="#panel-scan"
-                    type="button" role="tab">
-                    <i class="bi bi-broadcast-pin"></i> Escaneo
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-towers" data-bs-toggle="tab" data-bs-target="#panel-towers"
-                    type="button" role="tab" onclick="renderTowersPanel()">
-                    <i class="bi bi-building"></i> Torres
-                </button>
-            </li>
-            <li class="nav-item" id="usersTabItem" role="presentation" style="display:none;">
-                <button class="nav-link" id="tab-users" data-bs-toggle="tab" data-bs-target="#panel-users"
-                    type="button" role="tab" onclick="renderUsersPanel()">
-                    <i class="bi bi-people-fill"></i> Usuarios
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-history" data-bs-toggle="tab" data-bs-target="#panel-history"
-                    type="button" role="tab" onclick="renderHistoryPanel()">
-                    <i class="bi bi-clock-history"></i> Historial
-                </button>
-            </li>
-        </ul>
+        <!-- ── MAIN CONTENT ──────────────────────────────────────────────── -->
+        <main class="main-content">
 
-        <div class="tab-content flex-grow-1 tab-content-responsive">
+            <!-- ══════════════ PANEL: ESCANEO ══════════════ -->
+            <div class="tab-panel active" id="panel-scan">
+                <div class="scan-layout">
 
-            <!-- ==================== PANEL ESCANEO (existing) ==================== -->
-            <div class="tab-pane fade show active panel-scan-responsive" id="panel-scan" role="tabpanel">
-                <div class="row g-3 scan-row-responsive" style="min-height: 0;">
-                    <!-- Left Column: Config + Logs (Quadrants 1 & 3) -->
-                    <div class="col-12 col-md-6 d-flex flex-column gap-3 col-scan-responsive">
-                        <!-- Config Card (Auto Height) -->
-                        <div class="card shadow-sm border-0 d-flex flex-column"
-                            style="background: var(--card-bg); flex-shrink: 0;">
-                            <div class="card-header bg-primary text-white">
-                                <h5 class="mb-0"><i class="bi bi-gear-fill"></i> Configuración</h5>
+                    <!-- Columna Izquierda: Config + Log -->
+                    <div class="scan-col-left">
+
+                        <!-- Config Card -->
+                        <div class="glass-card">
+                            <div class="card-head">
+                                <h2><i class="bi bi-sliders2"></i> Configuración</h2>
                             </div>
-                            <div class="card-body overflow-auto">
-                                <!-- Community -->
-                                <div class="mb-3">
-                                    <label class="form-label text-light small">Comunidad SNMP</label>
-                                    <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                        id="snmpCommunity" placeholder="Cargando desde servidor...">
-                                    <div class="form-text text-muted" style="font-size: 0.7em;">Puede incluir m&uacute;ltiples
-                                        separadas por coma (se cargan desde .env)</div>
+                            <div class="card-body-inner">
+                                <div class="field-group">
+                                    <label class="field-label">Comunidad SNMP</label>
+                                    <input type="text" class="field-input" id="snmpCommunity" placeholder="Cargando...">
+                                    <span class="field-hint">Múltiples separadas por coma — se cargan desde .env</span>
                                 </div>
-
-                                <!-- Basic Params -->
-                                <div class="row g-2 mb-3">
-                                    <div class="col-6">
-                                        <label class="form-label text-light small">Target Rx (dBm)</label>
-                                        <input type="number"
-                                            class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="targetRxLevel" placeholder="...">
+                                <div class="field-row">
+                                    <div class="field-group">
+                                        <label class="field-label">Target Rx (dBm)</label>
+                                        <input type="number" class="field-input" id="targetRxLevel" placeholder="-52">
                                     </div>
-                                    <div class="col-6">
-                                        <label class="form-label text-light small">Ancho Canal</label>
-                                        <select class="form-select form-select-sm bg-dark text-light border-secondary"
-                                            id="channelWidth">
+                                    <div class="field-group">
+                                        <label class="field-label">Ancho de Canal</label>
+                                        <select class="field-input" id="channelWidth">
                                             <option value="5">5 MHz</option>
                                             <option value="10">10 MHz</option>
                                             <option value="15">15 MHz</option>
-                                            <option value="20">20 MHz</option>
+                                            <option value="20" selected>20 MHz</option>
                                             <option value="30">30 MHz</option>
                                             <option value="40">40 MHz</option>
                                         </select>
                                     </div>
                                 </div>
 
-
-
-                                <!-- Recent History -->
-                                <div class="mt-4">
-                                    <h6 class="text-muted border-bottom pb-2 small"><i class="bi bi-clock-history"></i>
-                                        Historial Reciente</h6>
-                                    <div id="recentScans" class="list-group list-group-flush small"
-                                        style="max-height: 120px; overflow-y: auto;">
-                                        <div class="text-center text-muted p-2">Cargando...</div>
+                                <!-- Recent Scans mini-list -->
+                                <div class="recent-section">
+                                    <label class="field-label"><i class="bi bi-clock-history"></i> Recientes</label>
+                                    <div id="recentScans" class="recent-list">
+                                        <div class="text-center text-muted small p-2">Cargando...</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Log Panel (New Persistent Location) -->
-                        <div class="card shadow-sm border-0 flex-fill d-flex flex-column"
-                            style="background: var(--card-bg); min-height: 0;">
-                            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0 small">
-                                    <i class="bi bi-terminal-fill"></i> Log de Ejecución
-                                    <span id="logNewLinesBadge"
-                                          class="badge bg-warning text-dark ms-2"
-                                          style="display:none; font-size:0.65rem;"
-                                          title="Nuevas entradas en el log">0 nuevas</span>
-                                </h6>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input form-check-input-sm" type="checkbox" id="detailedLogToggle">
-                                    <label class="form-check-label text-muted small" style="font-size: 0.7rem;"
-                                        for="detailedLogToggle">Verbose</label>
-                                </div>
+                        <!-- Log Panel -->
+                        <div class="glass-card log-card flex-fill">
+                            <div class="card-head">
+                                <h2><i class="bi bi-terminal-fill"></i> Log de Ejecución
+                                    <span id="logNewLinesBadge" class="log-badge" style="display:none;">0</span>
+                                </h2>
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="detailedLogToggle">
+                                    <span>Verbose</span>
+                                </label>
                             </div>
-                            <div class="card-body p-0 d-flex flex-column">
-                                <div id="logOutput" class="p-2 small font-monospace text-light flex-grow-1"
-                                    role="log" aria-live="polite" aria-label="Log de ejecución del escaneo"
-                                    style="overflow-y: auto; background: #1a1a1a;"></div>
-                            </div>
+                            <div class="log-feed" id="logOutput" role="log" aria-live="polite"></div>
                         </div>
-                    </div>
 
-                    <!-- Right Column: Targets + Results (Quadrants 2 & 4) -->
-                    <div class="col-12 col-md-6 d-flex flex-column gap-3 col-scan-responsive">
-                        <!-- Targets Card (Auto Height) -->
-                        <div class="card shadow-sm border-0 d-flex flex-column"
-                            style="background: var(--card-bg); flex-shrink: 0;">
-                            <div class="card-header bg-info text-dark d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0"><i class="bi bi-broadcast-pin"></i> Objetivos</h5>
-                                <button class="btn btn-sm btn-dark" id="openImportModalBtn"><i class="bi bi-cloud-arrow-up"></i>
-                                    Importar</button>
+                    </div><!-- /col-left -->
+
+                    <!-- Columna Derecha: Targets + Status/Results -->
+                    <div class="scan-col-right">
+
+                        <!-- AP Input Card -->
+                        <div class="glass-card" id="inputCard">
+                            <div class="card-head">
+                                <h2><i class="bi bi-router"></i> Access Points</h2>
                             </div>
-                            <div class="card-body d-flex flex-column">
-                                <!-- Alert area for scan feedback (replaces window.alert) -->
-                                <div id="scanAlert" class="mb-2" style="display:none;"></div>
-                                <div class="row g-2 flex-grow-1">
-                                    <div class="col-md-6 d-flex flex-column">
-                                        <label class="form-label text-light small">IPs de APs (Una por línea)</label>
-                                        <textarea
-                                            class="form-control form-control-sm bg-dark text-light border-secondary flex-grow-1"
-                                            id="apIPs" style="resize: none; min-height: 150px;"
-                                            placeholder="10.53.X.X"></textarea>
-                                        <input type="file" id="apFileUpload"
-                                            class="form-control form-control-sm mt-1 bg-secondary border-0" accept=".txt,.csv">
-                                    </div>
-                                    <div class="col-md-6 d-flex flex-column">
-                                        <label class="form-label text-light small">IPs de SMs (Opcional)</label>
-                                        <textarea
-                                            class="form-control form-control-sm bg-dark text-light border-secondary flex-grow-1"
-                                            id="smIPs" style="resize: none; min-height: 150px;"
-                                            placeholder="10.53.X.Y"></textarea>
-                                        <input type="file" id="smFileUpload"
-                                            class="form-control form-control-sm mt-1 bg-secondary border-0" accept=".txt,.csv">
-                                    </div>
+                            <div class="card-body-inner">
+                                <div id="scanAlert" class="scan-alert" style="display:none;"></div>
+
+                                <div class="field-group">
+                                    <label class="field-label">IPs de APs <span class="field-hint-inline">(una por línea)</span></label>
+                                    <textarea class="field-input field-textarea" id="apIPs" placeholder="10.53.X.X&#10;10.53.X.Y"></textarea>
+                                    <input type="file" id="apFileUpload" class="file-input" accept=".txt,.csv">
                                 </div>
-                            </div>
-                            <div class="card-footer bg-transparent border-0 text-end">
-                                <div class="d-flex align-items-center justify-content-between">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <label class="form-label text-light small mb-0">Ticket ID:</label>
-                                        <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="ticketId" placeholder="# ticket" min="1" style="width: 120px;">
+
+                                <!-- Discovery Section — aparece tras descubrir SMs -->
+                                <div id="discoverySection" style="display:none;">
+                                    <div class="discovery-header">
+                                        <i class="bi bi-diagram-3-fill"></i>
+                                        <span id="discoveryTitle">SMs Descubiertos</span>
+                                        <span id="discoveryCount" class="discovery-badge">0</span>
                                     </div>
-                                    <div>
-                                        <button id="clearBtn" class="btn btn-outline-secondary btn-sm me-2">Limpiar</button>
-                                        <button id="startScanBtn" class="btn btn-primary btn-sm px-4 fw-bold" disabled>
-                                            <i class="bi bi-play-circle-fill"></i> Iniciar Analisis
+                                    <div id="discoveryCards" class="discovery-grid"></div>
+                                </div>
+
+                                <div class="action-bar">
+                                    <div class="ticket-field">
+                                        <label class="field-label mb-0">Ticket ID</label>
+                                        <input type="number" class="field-input ticket-input" id="ticketId" placeholder="#" min="1">
+                                    </div>
+                                    <div class="action-buttons">
+                                        <button id="discoverBtn" class="btn-glass btn-discover" onclick="runDiscovery()">
+                                            <i class="bi bi-search"></i> Descubrir SMs
+                                        </button>
+                                        <button id="clearBtn" class="btn-glass btn-clear">
+                                            <i class="bi bi-arrow-counterclockwise"></i>
+                                        </button>
+                                        <button id="startScanBtn" class="btn-glass btn-start" disabled>
+                                            <i class="bi bi-play-circle-fill"></i> Iniciar Análisis
                                         </button>
                                     </div>
                                 </div>
-                                <div class="form-text text-muted text-start" style="font-size: 0.65em;">
-                                    Requerido para auditoria - identifica la orden de trabajo
+                            </div>
+                        </div>
+
+                        <!-- Empty State -->
+                        <div class="glass-card state-card flex-fill" id="emptyState">
+                            <div class="empty-content">
+                                <div class="empty-icon">
+                                    <i class="bi bi-broadcast"></i>
+                                </div>
+                                <h3>Listo para analizar</h3>
+                                <p>Ingresá las IPs de los APs, descubrí los SMs automáticamente y presioná <strong>Iniciar Análisis</strong>.</p>
+                                <div class="empty-steps">
+                                    <div class="empty-step"><span>1</span> Ingresá IPs de APs</div>
+                                    <div class="empty-step-arrow"><i class="bi bi-arrow-right"></i></div>
+                                    <div class="empty-step"><span>2</span> Descubrí SMs</div>
+                                    <div class="empty-step-arrow"><i class="bi bi-arrow-right"></i></div>
+                                    <div class="empty-step"><span>3</span> Iniciá el análisis</div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Quadrant 4: Results / Status / Welcome (Bottom Right) -->
-                        <div class="flex-fill position-relative d-flex flex-column" style="min-height: 0;">
-                            <!-- Empty State (shown when no scan is running or completed) -->
-                            <div id="emptyState" class="card shadow-lg border-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center"
-                                style="background: var(--card-bg);">
-                                <i class="bi bi-broadcast" style="font-size: 3.5rem; color: var(--accent-color); opacity: 0.5;"></i>
-                                <h5 class="mt-3 text-light">Listo para analizar</h5>
-                                <p class="text-muted small mb-0">Completa el formulario y presiona <strong>Iniciar Análisis</strong>.</p>
-                            </div>
-                            <!-- Status Panel -->
-                            <div id="statusPanel" class="card shadow-lg border-0 w-100 h-100"
-                                style="background: var(--card-bg); display: none;">
-                                <div class="card-body text-center p-5">
-                                    <h2 class="mb-4 text-white">Escanendo Red...</h2>
-                                    <div class="status-badge mb-3 text-white" id="statusBadge">Iniciando...</div>
-                                    <p class="text-light">Scan ID: <span id="scanIdDisplay">-</span></p>
+                        <!-- Status Panel (durante el scan) -->
+                        <div class="glass-card state-card flex-fill" id="statusPanel" style="display:none;">
+                            <div class="scan-progress-container">
+                                <div class="scan-title">
+                                    <div class="scan-pulse"></div>
+                                    <h3>Analizando Red...</h3>
+                                </div>
+                                <p class="scan-id-label">Scan ID: <code id="scanIdDisplay">-</code></p>
 
-                                    <div class="progress mb-3" style="height: 25px;">
-                                        <div id="progressFill"
-                                            class="progress-bar progress-bar-striped progress-bar-animated bg-success"
-                                            role="progressbar" style="width: 0%"></div>
+                                <!-- Stepper de 5 fases -->
+                                <div class="stepper" id="scanStepper">
+                                    <div class="step" id="step-validating">
+                                        <div class="step-dot"><i class="bi bi-shield-check"></i></div>
+                                        <div class="step-label">Validar</div>
                                     </div>
-                                    <p id="progressText" class="fw-bold text-white">0%</p>
+                                    <div class="step-line"></div>
+                                    <div class="step" id="step-discovering">
+                                        <div class="step-dot"><i class="bi bi-search"></i></div>
+                                        <div class="step-label">Descubrir</div>
+                                    </div>
+                                    <div class="step-line"></div>
+                                    <div class="step" id="step-scanning">
+                                        <div class="step-dot"><i class="bi bi-broadcast-pin"></i></div>
+                                        <div class="step-label">Escanear</div>
+                                    </div>
+                                    <div class="step-line"></div>
+                                    <div class="step" id="step-analyzing">
+                                        <div class="step-dot"><i class="bi bi-cpu"></i></div>
+                                        <div class="step-label">Analizar</div>
+                                    </div>
+                                    <div class="step-line"></div>
+                                    <div class="step" id="step-completed">
+                                        <div class="step-dot"><i class="bi bi-check-lg"></i></div>
+                                        <div class="step-label">Listo</div>
+                                    </div>
+                                </div>
+
+                                <!-- Progress bar -->
+                                <div class="progress-track">
+                                    <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                                </div>
+                                <p id="progressText" class="progress-label">0%</p>
+                                <div id="statusBadge" class="status-live-badge">Iniciando...</div>
+                            </div>
+                        </div>
+
+                        <!-- Results Panel -->
+                        <div class="glass-card results-card flex-fill" id="resultsPanel" style="display:none;">
+                            <div class="card-head results-head">
+                                <h2><i class="bi bi-check-circle-fill text-success-glow"></i> Resultados</h2>
+                                <div class="results-actions">
+                                    <button id="globalSpectrumBtn" class="btn-glass btn-sm-g" style="display:none;" onclick="openGlobalSpectrumViewer()">
+                                        <i class="bi bi-graph-up"></i> Espectro
+                                    </button>
+                                    <button id="exportResultsBtn" class="btn-glass btn-sm-g" onclick="exportResults()">
+                                        <i class="bi bi-download"></i> JSON
+                                    </button>
+                                    <button id="newScanBtn" class="btn-glass btn-sm-g" onclick="resetInterface()">
+                                        <i class="bi bi-arrow-repeat"></i> Nuevo
+                                    </button>
                                 </div>
                             </div>
 
-                            <!-- Results Panel -->
-                            <div id="resultsPanel" class="card shadow-lg border-0 w-100 h-100 d-flex flex-column"
-                                style="background: var(--card-bg); display: none;">
-                                <div
-                                    class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-                                    <h4 class="mb-0"><i class="bi bi-check-circle-fill"></i> Resultados del Análisis</h4>
-                                    <div>
-                                        <button id="globalSpectrumBtn" class="btn btn-info btn-sm me-2" style="display:none;"><i
-                                                class="bi bi-graph-up"></i>
-                                            Ver Espectro</button>
-                                        <button id="exportResultsBtn" class="btn btn-light btn-sm"><i
-                                                class="bi bi-download"></i>
-                                            JSON</button>
-                                        <button id="newScanBtn" class="btn btn-outline-light btn-sm"><i
-                                                class="bi bi-arrow-repeat"></i>
-                                            Nuevo</button>
-                                    </div>
+                            <!-- Summary -->
+                            <div id="resultsSummary" class="results-summary-bar"></div>
+
+                            <!-- Tabs de resultados -->
+                            <ul class="results-tabs" id="resultsTabs" role="tablist">
+                                <li>
+                                    <button class="rtab active" id="recommendations-tab"
+                                        data-bs-toggle="tab" data-bs-target="#recommendations-pane" type="button">
+                                        <i class="bi bi-star-fill"></i> Recomendaciones
+                                    </button>
+                                </li>
+                                <li>
+                                    <button class="rtab" id="installation-tab"
+                                        data-bs-toggle="tab" data-bs-target="#installation-pane" type="button">
+                                        <i class="bi bi-file-earmark-text"></i> Ficha de Instalación
+                                    </button>
+                                </li>
+                                <li>
+                                    <button class="rtab" id="details-tab"
+                                        data-bs-toggle="tab" data-bs-target="#details-pane" type="button">
+                                        <i class="bi bi-code-slash"></i> JSON Raw
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <div class="results-content tab-content" id="resultsContent">
+                                <div class="tab-pane fade show active" id="recommendations-pane" role="tabpanel">
+                                    <div id="frequencyRecommendations"></div>
                                 </div>
-                                <div class="card-body overflow-auto">
-                                <div id="resultsSummary" class="table-responsive mb-4"></div>
-
-                                    <ul class="nav nav-tabs mb-3" id="resultsTabs" role="tablist">
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link active" id="recommendations-tab" data-bs-toggle="tab"
-                                                data-bs-target="#recommendations-pane" type="button" role="tab"><i
-                                                    class="bi bi-star-fill"></i> Recomendaciones</button>
-                                        </li>
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link" id="installation-tab" data-bs-toggle="tab"
-                                                data-bs-target="#installation-pane" type="button" role="tab"><i
-                                                    class="bi bi-file-earmark-text"></i> Ficha de Instalación</button>
-                                        </li>
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link" id="details-tab" data-bs-toggle="tab"
-                                                data-bs-target="#details-pane" type="button" role="tab"><i
-                                                    class="bi bi-list-task"></i>
-                                                Detalles Técnicos</button>
-                                        </li>
-                                    </ul>
-
-                                    <div class="tab-content" id="resultsContent">
-                                        <div class="tab-pane fade show active" id="recommendations-pane" role="tabpanel">
-                                            <div class="table-responsive">
-                                                <div id="frequencyRecommendations"></div>
-                                            </div>
-                                        </div>
-                                        <div class="tab-pane fade" id="installation-pane" role="tabpanel">
-                                            <div id="installationSheetContent"></div>
-                                        </div>
-                                        <div class="tab-pane fade" id="details-pane" role="tabpanel">
-                                            <div class="alert alert-info">Seleccione un AP para ver su espectro completo.</div>
-                                            <div id="spectrumViewerPlaceholder"></div>
-                                        </div>
-                                    </div>
+                                <div class="tab-pane fade" id="installation-pane" role="tabpanel">
+                                    <div id="installationSheetContent"></div>
+                                </div>
+                                <div class="tab-pane fade" id="details-pane" role="tabpanel">
+                                    <div id="spectrumViewerPlaceholder"></div>
                                 </div>
                             </div>
                         </div>
-                    </div> <!-- End Right Column (col-md-6) -->
-                </div> <!-- End Row -->
-            </div><!-- End panel-scan -->
 
-            <!-- ==================== PANEL TORRES (T42) ==================== -->
-            <div class="tab-pane fade h-100" id="panel-towers" role="tabpanel" style="overflow-y: auto;">
-                <div class="card shadow-sm border-0 h-100" style="background: var(--card-bg);">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0"><i class="bi bi-building"></i> Gestión de Torres</h5>
-                        <button class="btn btn-light btn-sm" id="newTowerBtn" onclick="showTowerForm()">
+                    </div><!-- /col-right -->
+                </div><!-- /scan-layout -->
+            </div><!-- /panel-scan -->
+
+
+            <!-- ══════════════ PANEL: TORRES ══════════════ -->
+            <div class="tab-panel" id="panel-towers" style="display:none; overflow-y:auto; height:100%;">
+                <div class="glass-card h-100">
+                    <div class="card-head">
+                        <h2><i class="bi bi-building"></i> Gestión de Torres</h2>
+                        <button class="btn-glass btn-sm-g" id="newTowerBtn" onclick="showTowerForm()">
                             <i class="bi bi-plus-circle"></i> Nueva Torre
                         </button>
                     </div>
-                    <div class="card-body overflow-auto">
-
-                        <!-- Alert area -->
+                    <div class="card-body-inner" style="overflow-y:auto;">
                         <div id="towersAlert" style="display:none;"></div>
 
-                        <!-- Create/Edit Form (inline, hidden by default) -->
-                        <div id="towerFormPanel" class="card bg-dark border-secondary mb-3" style="display:none;">
-                            <div class="card-header text-light d-flex justify-content-between">
+                        <div id="towerFormPanel" class="form-panel" style="display:none;">
+                            <div class="form-panel-head">
                                 <span id="towerFormTitle"><i class="bi bi-plus-circle"></i> Nueva Torre</span>
-                                <button type="button" class="btn-close btn-close-white btn-sm" onclick="hideTowerForm()"></button>
+                                <button type="button" class="btn-icon" onclick="hideTowerForm()"><i class="bi bi-x-lg"></i></button>
                             </div>
-                            <div class="card-body">
+                            <div class="form-panel-body">
                                 <input type="hidden" id="towerFormMode" value="create">
                                 <input type="hidden" id="towerFormEditId" value="">
-                                <div class="row g-3">
-                                    <div class="col-md-6">
-                                        <label class="form-label text-light small">Tower ID *</label>
-                                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="towerFieldId" placeholder="Ej: BAJ02-RTD-ENSE-003">
-                                        <div class="form-text text-muted" style="font-size:0.7em;">No editable una vez creada</div>
+                                <div class="field-row">
+                                    <div class="field-group">
+                                        <label class="field-label">Tower ID *</label>
+                                        <input type="text" class="field-input" id="towerFieldId" placeholder="BAJ02-RTD-ENSE-003">
+                                        <span class="field-hint">No editable una vez creada</span>
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label text-light small">Nombre *</label>
-                                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="towerFieldName" placeholder="Nombre descriptivo">
+                                    <div class="field-group">
+                                        <label class="field-label">Nombre *</label>
+                                        <input type="text" class="field-input" id="towerFieldName" placeholder="Nombre descriptivo">
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label text-light small">Ubicación</label>
-                                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="towerFieldLocation" placeholder="Dirección o coordenadas">
+                                    <div class="field-group">
+                                        <label class="field-label">Ubicación</label>
+                                        <input type="text" class="field-input" id="towerFieldLocation" placeholder="Dirección o coordenadas">
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label text-light small">Notas</label>
-                                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="towerFieldNotes" placeholder="Notas adicionales">
+                                    <div class="field-group">
+                                        <label class="field-label">Notas</label>
+                                        <input type="text" class="field-input" id="towerFieldNotes" placeholder="Notas adicionales">
                                     </div>
                                 </div>
-                                <div class="mt-3 text-end">
-                                    <button type="button" class="btn btn-secondary btn-sm me-2" onclick="hideTowerForm()">Cancelar</button>
-                                    <button type="button" class="btn btn-primary btn-sm" id="towerFormSubmitBtn" onclick="submitTowerForm()">
+                                <div class="form-panel-actions">
+                                    <button class="btn-glass btn-clear" onclick="hideTowerForm()">Cancelar</button>
+                                    <button class="btn-glass btn-start" id="towerFormSubmitBtn" onclick="submitTowerForm()">
                                         <i class="bi bi-save"></i> Guardar
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Towers Table -->
                         <div id="towersTableContainer">
                             <div class="text-center text-muted p-4">
-                                <div class="spinner-border spinner-border-sm text-primary me-2"></div>
-                                Cargando torres...
+                                <div class="spinner-border spinner-border-sm text-primary me-2"></div> Cargando torres...
                             </div>
                         </div>
                     </div>
                 </div>
-            </div><!-- End panel-towers -->
+            </div>
 
-            <!-- ==================== PANEL USUARIOS (T43, admin only) ==================== -->
-            <div class="tab-pane fade h-100" id="panel-users" role="tabpanel" style="overflow-y: auto;">
-                <div class="card shadow-sm border-0 h-100" style="background: var(--card-bg);">
-                    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0"><i class="bi bi-people-fill"></i> Gestión de Usuarios</h5>
-                        <button class="btn btn-light btn-sm" id="newUserBtn" onclick="showUserForm()">
-                            <i class="bi bi-person-plus"></i> Nuevo Usuario
+
+            <!-- ══════════════ PANEL: USUARIOS ══════════════ -->
+            <div class="tab-panel" id="panel-users" style="display:none; overflow-y:auto; height:100%;">
+                <div class="glass-card h-100">
+                    <div class="card-head">
+                        <h2><i class="bi bi-people-fill"></i> Gestión de Usuarios</h2>
+                        <button class="btn-glass btn-sm-g" id="newUserBtn" onclick="showUserForm()">
+                            <i class="bi bi-person-plus"></i> Nuevo
                         </button>
                     </div>
-                    <div class="card-body overflow-auto">
-
-                        <!-- Alert area -->
+                    <div class="card-body-inner" style="overflow-y:auto;">
                         <div id="usersAlert" style="display:none;"></div>
-
-                        <!-- Create Form -->
-                        <div id="userFormPanel" class="card bg-dark border-secondary mb-3" style="display:none;">
-                            <div class="card-header text-light d-flex justify-content-between">
+                        <div id="userFormPanel" class="form-panel" style="display:none;">
+                            <div class="form-panel-head">
                                 <span><i class="bi bi-person-plus"></i> Nuevo Usuario</span>
-                                <button type="button" class="btn-close btn-close-white btn-sm" onclick="hideUserForm()"></button>
+                                <button type="button" class="btn-icon" onclick="hideUserForm()"><i class="bi bi-x-lg"></i></button>
                             </div>
-                            <div class="card-body">
-                                <div class="row g-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label text-light small">Username *</label>
-                                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="userFieldUsername" placeholder="nombre de usuario">
+                            <div class="form-panel-body">
+                                <div class="field-row">
+                                    <div class="field-group">
+                                        <label class="field-label">Username *</label>
+                                        <input type="text" class="field-input" id="userFieldUsername" placeholder="nombre de usuario">
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label text-light small">Password *</label>
-                                        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                            id="userFieldPassword" placeholder="mín. 6 caracteres">
+                                    <div class="field-group">
+                                        <label class="field-label">Password *</label>
+                                        <input type="password" class="field-input" id="userFieldPassword" placeholder="mín. 6 caracteres">
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label text-light small">Rol</label>
-                                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="userFieldRole">
+                                    <div class="field-group">
+                                        <label class="field-label">Rol</label>
+                                        <select class="field-input" id="userFieldRole">
                                             <option value="operator">Operador</option>
                                             <option value="admin">Admin</option>
                                         </select>
                                     </div>
                                 </div>
-                                <div class="mt-3 text-end">
-                                    <button type="button" class="btn btn-secondary btn-sm me-2" onclick="hideUserForm()">Cancelar</button>
-                                    <button type="button" class="btn btn-danger btn-sm" onclick="submitUserForm()">
+                                <div class="form-panel-actions">
+                                    <button class="btn-glass btn-clear" onclick="hideUserForm()">Cancelar</button>
+                                    <button class="btn-glass btn-start" onclick="submitUserForm()">
                                         <i class="bi bi-person-plus"></i> Crear Usuario
                                     </button>
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Users Table -->
                         <div id="usersTableContainer">
                             <div class="text-center text-muted p-4">
-                                <div class="spinner-border spinner-border-sm text-danger me-2"></div>
-                                Cargando usuarios...
+                                <div class="spinner-border spinner-border-sm text-danger me-2"></div> Cargando usuarios...
                             </div>
                         </div>
                     </div>
                 </div>
-            </div><!-- End panel-users -->
+            </div>
 
-            <!-- ==================== PANEL HISTORIAL (T44) ==================== -->
-            <div class="tab-pane fade h-100" id="panel-history" role="tabpanel" style="overflow-y: auto;">
-                <div class="card shadow-sm border-0 h-100" style="background: var(--card-bg);">
-                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Historial de Escaneos</h5>
-                        <button class="btn btn-light btn-sm" onclick="renderHistoryPanel()">
+
+            <!-- ══════════════ PANEL: HISTORIAL ══════════════ -->
+            <div class="tab-panel" id="panel-history" style="display:none; overflow-y:auto; height:100%;">
+                <div class="glass-card h-100">
+                    <div class="card-head">
+                        <h2><i class="bi bi-clock-history"></i> Historial de Escaneos</h2>
+                        <button class="btn-glass btn-sm-g" onclick="renderHistoryPanel()">
                             <i class="bi bi-arrow-clockwise"></i> Actualizar
                         </button>
                     </div>
-                    <div class="card-body overflow-auto">
-
-                        <!-- Alert area -->
+                    <div class="card-body-inner" style="overflow-y:auto;">
                         <div id="historyAlert" style="display:none;"></div>
 
-                        <!-- Scan History Table -->
                         <div id="historyTableContainer">
                             <div class="text-center text-muted p-4">
-                                <div class="spinner-border spinner-border-sm text-secondary me-2"></div>
-                                Cargando historial...
+                                <div class="spinner-border spinner-border-sm text-secondary me-2"></div> Cargando historial...
                             </div>
                         </div>
 
-                        <!-- Scan Detail + Verification Form (hidden by default) -->
                         <div id="scanDetailPanel" style="display:none;" class="mt-3">
-                            <div class="card bg-dark border-secondary">
-                                <div class="card-header text-light d-flex justify-content-between align-items-center">
-                                    <span><i class="bi bi-info-circle"></i> Detalle del Escaneo: <code id="scanDetailId"></code></span>
-                                    <button type="button" class="btn-close btn-close-white btn-sm" onclick="hideScanDetail()"></button>
+                            <div class="form-panel">
+                                <div class="form-panel-head">
+                                    <span><i class="bi bi-info-circle"></i> Detalle: <code id="scanDetailId"></code></span>
+                                    <button type="button" class="btn-icon" onclick="hideScanDetail()"><i class="bi bi-x-lg"></i></button>
                                 </div>
-                                <div class="card-body">
+                                <div class="form-panel-body">
                                     <div id="scanDetailContent" class="mb-3 text-light small"></div>
-
-                                    <!-- Verification Form -->
-                                    <hr class="border-secondary">
-                                    <h6 class="text-warning"><i class="bi bi-check2-circle"></i> Registrar Verificación de Configuración</h6>
-                                    <div class="row g-2 mt-2">
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">IP del AP</label>
-                                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldApIp" placeholder="10.53.x.x">
+                                    <hr style="border-color: rgba(255,255,255,0.1);">
+                                    <h6 class="field-label" style="color:var(--warning);"><i class="bi bi-check2-circle"></i> Registrar Verificación</h6>
+                                    <div class="field-row mt-2">
+                                        <div class="field-group">
+                                            <label class="field-label">IP del AP</label>
+                                            <input type="text" class="field-input" id="verifFieldApIp" placeholder="10.53.x.x">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">Frecuencia Recomendada (MHz)</label>
-                                            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldRecommendedFreq" placeholder="Autorellenado">
+                                        <div class="field-group">
+                                            <label class="field-label">Freq. Recomendada (MHz)</label>
+                                            <input type="number" class="field-input" id="verifFieldRecommendedFreq" placeholder="Autorellenado">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">Frecuencia Aplicada (MHz)</label>
-                                            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldAppliedFreq" placeholder="Freq. configurada">
+                                        <div class="field-group">
+                                            <label class="field-label">Freq. Aplicada (MHz)</label>
+                                            <input type="number" class="field-input" id="verifFieldAppliedFreq" placeholder="Freq. configurada">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">Ancho de Canal (MHz)</label>
-                                            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldChannelWidth" placeholder="Ej: 20">
+                                        <div class="field-group">
+                                            <label class="field-label">Ancho de Canal (MHz)</label>
+                                            <input type="number" class="field-input" id="verifFieldChannelWidth" placeholder="Ej: 20">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">Torre ID (opcional)</label>
-                                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldTowerId" placeholder="Ej: BAJ02-RTD-001">
+                                        <div class="field-group">
+                                            <label class="field-label">Torre ID</label>
+                                            <input type="text" class="field-input" id="verifFieldTowerId" placeholder="BAJ02-RTD-001">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label text-light small">Notas</label>
-                                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                                id="verifFieldNotes" placeholder="Observaciones">
+                                        <div class="field-group">
+                                            <label class="field-label">Notas</label>
+                                            <input type="text" class="field-input" id="verifFieldNotes" placeholder="Observaciones">
                                         </div>
                                     </div>
-                                    <div class="mt-3 text-end">
-                                        <button type="button" class="btn btn-warning btn-sm" onclick="submitVerificationForm()">
+                                    <div class="form-panel-actions">
+                                        <button class="btn-glass btn-discover" onclick="submitVerificationForm()">
                                             <i class="bi bi-check2-circle"></i> Registrar Verificación
                                         </button>
                                     </div>
-
-                                    <!-- Existing verifications for this scan -->
                                     <div id="scanVerificationsContainer" class="mt-3"></div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div><!-- End panel-history -->
-
-        </div><!-- End tab-content -->
-
-        <!-- Footer -->
-        <footer class="text-center mt-2 text-muted small">
-            <p><i class="bi bi-lightning-fill text-warning"></i>Python + Flask + Docker</p>
-        </footer>
-    </div>
-
-    <!-- CMMAESTRO IMPORT MODAL -->
-    <div id="importModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close" id="closeImportModal">&times;</span>
-            <h2><i class="bi bi-cloud-arrow-down-fill text-primary"></i> Importar de cnMaestro</h2>
-
-            <div class="step-container" id="importWizard">
-                <!-- Step 1: Loading -->
-                <div id="stepLoading" class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status"></div>
-                    <p class="mt-2">Cargando inventario...</p>
-                </div>
-
-                <!-- Step 2: Selection -->
-                <div id="stepSelection" style="display:none;">
-                    <div class="mb-3">
-                        <label class="form-label">Municipio / Red</label>
-                        <select id="networkSelect" class="form-select"></select>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Torre</label>
-                        <select id="towerSelect" class="form-select" disabled></select>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Access Point (AP)</label>
-                        <select id="apSelect" class="form-select" disabled></select>
-                    </div>
-
-                    <div class="alert alert-info mt-3" id="smPreviewBox" style="display:none;">
-                        <strong><i class="bi bi-info-circle"></i> SMs Asociados:</strong>
-                        <span id="smCountBadge">0</span>
-                        <div class="sm-list-preview" id="smListPreview"
-                            style="max-height: 100px; overflow-y: auto; font-size: 0.8rem; margin-top: 5px;"></div>
-                    </div>
-                </div>
             </div>
 
-            <div class="modal-footer mt-4">
-                <button id="confirmImportBtn" class="btn btn-primary w-100" disabled>
-                    Importar AP y SMs Seleccionados
-                </button>
-            </div>
-        </div>
-    </div>
+        </main><!-- /main-content -->
+    </div><!-- /app-shell -->
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=14"></script>
-    <script src="{{ url_for('static', filename='js/towers.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/users.js') }}?v=1"></script>
-    <script src="{{ url_for('static', filename='js/history.js') }}?v=1"></script>
+    <script>
+        // Tab switcher para el nuevo layout sidebar
+        function switchTab(tab) {
+            // Hide all panels
+            document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+            // Deactivate all nav items
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            // Show target panel
+            const panel = document.getElementById('panel-' + tab);
+            if (panel) panel.style.display = tab === 'scan' ? '' : 'block';
+            // Activate nav item
+            const navBtn = document.getElementById('nav-' + tab);
+            if (navBtn) navBtn.classList.add('active');
+        }
+        // Bootstrap compat: legacy tab-pane/nav-tabs referencing moved to switchTab
+        // Expose legacy tab selectors used by history.js / towers.js
+        document.getElementById = (function(orig) {
+            return function(id) {
+                return orig.call(document, id);
+            };
+        })(document.getElementById);
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=15"></script>
+    <script src="{{ url_for('static', filename='js/towers.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/users.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/history.js') }}?v=2"></script>
 </body>
-
 </html>

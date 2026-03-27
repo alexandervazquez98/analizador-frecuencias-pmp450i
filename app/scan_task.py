@@ -57,6 +57,8 @@ class ScanTask:
         self.audit_manager = audit_manager
         self.storage_manager = storage_manager
         self._start_time: Optional[float] = None
+        # ap-sm-autodiscovery: mapa de discovery {ap_ip: [{luid, ip, mac, site_name}]}
+        self.ap_sm_discovery: Dict = {}
 
     def log(self, msg: str, level: str = "info"):
         """Log message to console and internal buffer."""
@@ -134,6 +136,66 @@ class ScanTask:
             # Todos validos, proceder
             self.ap_ips = valid_aps
             self.sm_ips = valid_sms
+
+            # ── Fase 0.5: Auto-discovery de SMs (ap-sm-autodiscovery) ──────────
+            # Descubrir los SMs registrados en cada AP via SNMP WALK sobre linkTable.
+            # Construye ap_sm_map para que el cross-analysis cruce solo los SMs
+            # que pertenecen a cada AP (fix del bug de mezcla de SMs).
+            self._update_status("discovering", progress=5)
+            self.log("Descubriendo SMs registrados en cada AP via SNMP...")
+
+            discovery_scanner = TowerScanner(
+                self.ap_ips,
+                self.snmp_communities,
+                log_callback=self.log,
+            )
+
+            ap_sm_map: Dict[str, List[str]] = {}       # {ap_ip: [sm_ip, ...]}
+            ap_sm_site_names: Dict[str, Dict[str, str]] = {}  # {ap_ip: {sm_ip: site_name}}
+
+            for ap_ip in self.ap_ips:
+                try:
+                    sms = await discovery_scanner.discover_registered_sms_from_ap(ap_ip)
+                    ap_sm_map[ap_ip] = [sm.ip for sm in sms if sm.ip]
+                    ap_sm_site_names[ap_ip] = {
+                        sm.ip: sm.site_name for sm in sms if sm.ip
+                    }
+                    # Guardar en self para incluir en resultados finales
+                    self.ap_sm_discovery[ap_ip] = [
+                        {"luid": sm.luid, "ip": sm.ip, "mac": sm.mac,
+                         "site_name": sm.site_name}
+                        for sm in sms
+                    ]
+                    if sms:
+                        self.log(
+                            f"  AP {ap_ip}: {len(sms)} SMs descubiertos — "
+                            + ", ".join(sm.site_name for sm in sms),
+                            "success",
+                        )
+                    else:
+                        self.log(f"  AP {ap_ip}: sin SMs activos", "warning")
+                except Exception as disc_err:
+                    self.log(f"  AP {ap_ip}: error en discovery — {disc_err}", "warning")
+                    ap_sm_map[ap_ip] = []
+                    ap_sm_site_names[ap_ip] = {}
+
+            # Construir lista flat de SMs descubiertos (para el TowerScanner)
+            discovered_sm_ips = list(
+                {ip for ips in ap_sm_map.values() for ip in ips if ip}
+            )
+            if discovered_sm_ips:
+                self.sm_ips = discovered_sm_ips
+                self.analysis_mode = "AP_SM_CROSS"
+                self.log(
+                    f"Discovery completado: {len(discovered_sm_ips)} SMs activos "
+                    f"en {len(self.ap_ips)} AP(s)",
+                    "success",
+                )
+            else:
+                self.log(
+                    "No se encontraron SMs activos — modo AP_ONLY", "warning"
+                )
+                self.analysis_mode = "AP_ONLY"
 
             # Fase 1: Tower Scan (SNMP)
             self._update_status("scanning", progress=10)
@@ -325,11 +387,21 @@ class ScanTask:
 
                         sm_data = []
                         logger.info(
-                            f"[{self.scan_id}] Procesando {len(sm_xmls)} XMLs de SMs. "
-                            f"IPs: {list(sm_xmls.keys())}"
+                            f"[{self.scan_id}] Procesando XMLs de SMs para AP {ap_ip}."
                         )
 
+                        # ap-sm-autodiscovery FIX: solo usar SMs de este AP
+                        sm_ips_for_this_ap = set(ap_sm_map.get(ap_ip, []))
+                        site_names_for_this_ap = ap_sm_site_names.get(ap_ip, {})
+
                         for sm_ip in sm_xmls.keys():
+                            # Filtrar: solo procesar SMs que pertenecen a este AP
+                            if sm_ips_for_this_ap and sm_ip not in sm_ips_for_this_ap:
+                                logger.debug(
+                                    f"[{self.scan_id}] SM {sm_ip} no pertenece "
+                                    f"a AP {ap_ip} — omitido"
+                                )
+                                continue
                             try:
                                 sm_spectrum = freq_analyzer.parse_spectrum_xml(
                                     sm_xmls[sm_ip]
@@ -431,6 +503,14 @@ class ScanTask:
                             },
                             "sm_count": len(sm_data),
                             "sm_ips": [sm.ip for sm in sm_data],
+                            # ap-sm-autodiscovery: site names por SM para el frontend
+                            "sm_details": [
+                                {
+                                    "ip": sm.ip,
+                                    "site_name": site_names_for_this_ap.get(sm.ip, sm.ip),
+                                }
+                                for sm in sm_data
+                            ],
                             # Bug fix #33-2: limit combined_ranking to 50 to avoid
                             # SQLite JSON truncation on very large result sets
                             "combined_ranking": df_combined.to_dict("records")[:50],

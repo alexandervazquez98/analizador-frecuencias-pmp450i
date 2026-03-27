@@ -17,10 +17,10 @@ services:
       - DEFAULT_MIN_SNR=${DEFAULT_MIN_SNR}
       - DEFAULT_MAX_POLARIZATION_DIFF=${DEFAULT_MAX_POLARIZATION_DIFF}
       - DEFAULT_CHANNEL_WIDTH=${DEFAULT_CHANNEL_WIDTH}
-      # cnMaestro API
-      - CNMAESTRO_URL=${CNMAESTRO_URL}
-      - CNMAESTRO_ID=${CNMAESTRO_ID}
-      - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
+      # cnMaestro API (deprecated: replaced by SNMP auto-discovery in ap-sm-autodiscovery)
+      # - CNMAESTRO_URL=${CNMAESTRO_URL}
+      # - CNMAESTRO_ID=${CNMAESTRO_ID}
+      # - CNMAESTRO_SECRET=${CNMAESTRO_SECRET}
       # Base de datos unificada (v3.0.0 — reemplaza AUTH_DB_PATH + STORAGE_FILE_PATH)
       - DB_PATH=/app/data/analyzer.db
       # Zona horaria del contenedor (Issue #8 — sincronizar con host)

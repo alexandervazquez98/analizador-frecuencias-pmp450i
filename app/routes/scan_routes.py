@@ -1,12 +1,13 @@
 """
 app/routes/scan_routes.py — Scan management blueprint for the PMP 450i Analyzer.
 
-Contains scan initiation, status, results, listing, health, config, and cnMaestro routes.
+Contains scan initiation, status, results, listing, health, config, and discovery routes.
 ScanTask is now in app/scan_task.py.
 Helpers (parse_ip_list, get_scan_defaults) are now in app/scan_helpers.py.
 JSON file storage replaced by ScanStorageManager (SQLite) via app.config.
 
 Design: change-005 design § D4.5 — Scan Module Split
+Change: ap-sm-autodiscovery — GET /api/discover + eliminación de cnMaestro
 """
 
 from flask import (
@@ -20,8 +21,9 @@ from app.routes.auth_routes import login_required
 from app.scan_task import ScanTask
 from app.scan_helpers import parse_ip_list, get_scan_defaults
 from app.audit_manager import AuditManager, AuditLogException
-from app.cnmaestro_client import CnMaestroClient
+from app.tower_scan import TowerScanner
 from functools import wraps
+import asyncio
 import threading
 import uuid
 from datetime import datetime
@@ -133,14 +135,6 @@ def requires_audit_ticket(f):
             raise
 
     return decorated_function
-
-
-# CnMaestro Configuration
-CNMAESTO_URL = os.environ.get("CNMAESTRO_URL", "https://10.3.152.206/api/v1")
-CNMAESTRO_ID = os.environ.get("CNMAESTRO_ID", "")
-CNMAESTRO_SECRET = os.environ.get("CNMAESTRO_SECRET", "")
-
-cnmaestro_client = CnMaestroClient(CNMAESTO_URL, CNMAESTRO_ID, CNMAESTRO_SECRET)
 
 
 # ==================== RUTAS API ====================
@@ -337,16 +331,84 @@ def get_scan_status(scan_id: str):
     return jsonify(response)
 
 
-@scan_bp.route("/api/cnmaestro/inventory", methods=["GET"])
+@scan_bp.route("/api/discover", methods=["GET"])
 @login_required
-def get_cnmaestro_inventory():
-    """Get processed inventory from cnMaestro."""
+def discover_sms():
+    """Descubrir SMs registrados para una lista de APs vía SNMP WALK.
+
+    Query params:
+      ap_ips (str): IPs separadas por coma (ej. "10.53.8.2,10.53.8.3")
+
+    Response 200:
+      {
+        "10.53.8.2": [
+          {"luid": 2, "ip": "10.53.8.253", "mac": "...", "site_name": "BAJ02-ARC-TIJU-002", "state": 1},
+          ...
+        ],
+        "errors": {"10.53.8.3": "No responde"}
+      }
+
+    Change: ap-sm-autodiscovery — REQ-01 / REQ-04
+    """
+    ap_ips_raw = request.args.get("ap_ips", "")
+    ap_ips = parse_ip_list(ap_ips_raw)
+
+    if not ap_ips:
+        return jsonify({"error": "Se requiere al menos un AP en ap_ips"}), 400
+
+    defaults = get_scan_defaults()
+    snmp_communities = defaults["snmp_communities"]
+
+    # Instanciar scanner temporal solo para el discovery
+    scanner = TowerScanner(
+        ap_ips=ap_ips,
+        snmp_communities=snmp_communities,
+    )
+
+    async def _run_discovery():
+        """Ejecutar discovery en paralelo para todos los APs."""
+        tasks = [
+            scanner.discover_registered_sms_from_ap(ap_ip) for ap_ip in ap_ips
+        ]
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
     try:
-        force = request.args.get("force") == "true"
-        inventory = cnmaestro_client.get_full_inventory(force_refresh=force)
-        return jsonify(inventory)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        results_raw = loop.run_until_complete(_run_discovery())
+        loop.close()
     except Exception as e:
+        logger.error(f"[DISCOVER] Error ejecutando discovery: {e}")
         return jsonify({"error": str(e)}), 500
+
+    response: Dict = {}
+    errors: Dict = {}
+
+    for ap_ip, result in zip(ap_ips, results_raw):
+        if isinstance(result, Exception):
+            logger.warning(f"[DISCOVER] {ap_ip}: Error en discovery — {result}")
+            errors[ap_ip] = str(result)
+            response[ap_ip] = []
+        else:
+            response[ap_ip] = [
+                {
+                    "luid": sm.luid,
+                    "ip": sm.ip,
+                    "mac": sm.mac,
+                    "site_name": sm.site_name,
+                    "state": sm.state,
+                }
+                for sm in result
+            ]
+
+    if errors:
+        response["errors"] = errors
+
+    logger.info(
+        f"[DISCOVER] Completado: {len(ap_ips)} APs, "
+        f"{sum(len(v) for k, v in response.items() if k != 'errors')} SMs activos"
+    )
+    return jsonify(response)
 
 
 @scan_bp.route("/api/results/<scan_id>", methods=["GET"])
