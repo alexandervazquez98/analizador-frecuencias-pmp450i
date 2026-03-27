@@ -39,14 +39,98 @@ def spectrum_view(ip):
     return render_template("spectrum_viewer.html", ip=ip)
 
 
+@spectrum_bp.route("/api/spectrum/<scan_id>/<ap_ip>")
+@login_required
+def get_spectrum_for_viewer(scan_id, ap_ip):
+    """
+    Endpoint dedicado para el visor de espectro.
+
+    Devuelve los datos de espectro del AP y de todos sus SMs asociados
+    en el formato que espera spectrum_viewer.html:
+      { "ap": [{frequency, vertical, horizontal}, ...],
+        "sms": { "ip": [{frequency, vertical, horizontal}, ...], ... } }
+
+    Prioriza in-memory hot cache (scan activo en esta sesion de Flask)
+    antes de caer al SQLite storage. Esto evita el problema de truncacion
+    de JSON al recuperar resultados grandes de la DB.
+    """
+    from app.routes.scan_routes import active_scans
+
+    def _extract_spectrum_data(results):
+        """Extraer spectrum_data del AP desde el dict de resultados del scan."""
+        if not isinstance(results, dict):
+            return None
+        analysis = results.get("analysis_results", {})
+        if ap_ip not in analysis:
+            return None
+        ap_result = analysis[ap_ip]
+        if not isinstance(ap_result, dict):
+            return None
+
+        # AP_SM_CROSS: spectrum_data tiene ap y sms
+        spec = ap_result.get("spectrum_data")
+        if spec and isinstance(spec, dict):
+            ap_points = spec.get("ap", [])
+            sm_points = spec.get("sms", {})
+            if ap_points or sm_points:
+                return {"ap": ap_points, "sms": sm_points}
+
+        # AP_ONLY fallback: spectrum_data puede ser lista o dict con solo ap
+        if isinstance(spec, list) and spec:
+            return {"ap": spec, "sms": {}}
+
+        # Ultimo fallback: raw_spectrum (lista flat de {freq, noise})
+        raw = ap_result.get("raw_spectrum", [])
+        if raw:
+            ap_points = [
+                {"frequency": p["freq"], "vertical": p["noise"], "horizontal": p["noise"]}
+                for p in raw
+            ]
+            return {"ap": ap_points, "sms": {}}
+
+        return None
+
+    # 1. Buscar en hot cache (scan reciente en memoria — sin perdida de datos)
+    for _sid, data in active_scans.items():
+        if _sid != scan_id:
+            continue
+        task = data.get("task")
+        if task and hasattr(task, "results") and task.results:
+            spec = _extract_spectrum_data(task.results)
+            if spec:
+                logger.info(
+                    f"[spectrum] Datos servidos desde hot cache: "
+                    f"AP={ap_ip}, SMs={len(spec.get('sms', {}))}"
+                )
+                return jsonify(spec)
+
+    # 2. Fallback: SQLite storage
+    storage_manager = current_app.config.get("scan_storage_manager")
+    if storage_manager is not None:
+        scan_data = storage_manager.get_scan(scan_id)
+        if scan_data and scan_data.get("results"):
+            spec = _extract_spectrum_data(scan_data["results"])
+            if spec:
+                logger.info(
+                    f"[spectrum] Datos servidos desde SQLite: "
+                    f"AP={ap_ip}, SMs={len(spec.get('sms', {}))}"
+                )
+                return jsonify(spec)
+
+    logger.warning(
+        f"[spectrum] No se encontraron datos de espectro para scan={scan_id}, ap={ap_ip}"
+    )
+    return jsonify(
+        {"error": f"No hay datos de espectro disponibles para este AP ({ap_ip})."}
+    ), 404
+
+
 @spectrum_bp.route("/api/spectrum_data/<ip>")
 @login_required
 def get_spectrum_data_api(ip):
-    """Get spectrum data for specific IP"""
-    # Import scan module-level state lazily to avoid circular imports
+    """Legacy endpoint — kept for backward compat. Use /api/spectrum/<scan_id>/<ap_ip>."""
     from app.routes.scan_routes import active_scans
 
-    # Helper to extract spectrum response from analysis_results dict
     def _extract_spectrum(analysis_results):
         if not isinstance(analysis_results, dict):
             return None
@@ -63,7 +147,6 @@ def get_spectrum_data_api(ip):
                 )
         return None
 
-    # 1. Buscar en active_scans (scans en memoria)
     for _scan_id, data in active_scans.items():
         task = data.get("task")
         if task and hasattr(task, "results") and task.results:
@@ -71,7 +154,6 @@ def get_spectrum_data_api(ip):
             if resp:
                 return resp
 
-    # 2. Fallback: buscar en SQLite storage
     storage_manager = current_app.config.get("scan_storage_manager")
     if storage_manager is not None:
         stored_list = storage_manager.get_all_scans()

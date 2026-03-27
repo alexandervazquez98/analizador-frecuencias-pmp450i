@@ -122,19 +122,21 @@
 
         document.addEventListener('DOMContentLoaded', async () => {
             try {
-                // Fetch scan data
-                const response = await fetch(`/api/results/${scanId}`);
-                if (!response.ok) throw new Error("Error obteniendo datos");
+                // Fetch spectrum data from dedicated endpoint (AP + all SMs)
+                const response = await fetch(`/api/spectrum/${scanId}/${apIp}`);
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.error || `HTTP ${response.status}`);
+                }
 
-                const data = await response.json();
-                const results = data.analysis_results ? data.analysis_results[apIp] : null;
+                const spectrumData = await response.json();
 
-                if (!results || !results.spectrum_data) {
+                if (!spectrumData.ap || spectrumData.ap.length === 0) {
                     alert("No hay datos de espectro disponibles para este AP.");
                     return;
                 }
 
-                initChart(results.spectrum_data);
+                initChart(spectrumData);
 
             } catch (error) {
                 console.error(error);
