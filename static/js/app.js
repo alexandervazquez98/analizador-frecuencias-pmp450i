@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tower Scan Automation - Frontend JavaScript
  * Maneja la interfaz web, comunicaci\u00f3n con API y visualizaci\u00f3n de datos
  */
@@ -918,12 +918,15 @@ async function loadRecentScans() {
         }
 
         elements.recentScans.innerHTML = scans.map(scan => {
-            const d = scan.created_at ? new Date(scan.created_at).toLocaleString('es', {dateStyle:'short', timeStyle:'short'}) : 'N/A';
+            let rawTs = scan.created_at || '';
+            if (rawTs && !rawTs.endsWith('Z') && !rawTs.includes('+') && !/T.*[+-]\d{2}/.test(rawTs)) {
+                rawTs = rawTs.replace(' ', 'T') + 'Z';
+            }
+            const d = rawTs ? new Date(rawTs).toLocaleString('es', {dateStyle:'short', timeStyle:'short'}) : 'N/A';
             const isClickable = scan.status === 'completed';
             const mode = scan.analysis_mode === 'AP_SM_CROSS' ? 'Cross' : 'AP';
             return `<div class="recent-item ${isClickable ? 'recent-scan-entry' : ''}" data-scan-id="${escapeAttr(scan.scan_id)}" style="${!isClickable ? 'opacity:0.5;cursor:default;' : ''}">
-                <span class="ri-id">${scan.scan_id.substring(0, 8)}</span>
-                <span class="ri-mode">${mode} Â· ${scan.ap_count || 0} APs</span>
+                <span class="ri-mode">${mode} · ${scan.ap_count || 0} APs</span>
                 <span class="ri-date">${d}</span>
             </div>`;
         }).join('');
@@ -1396,4 +1399,5 @@ function showApplyResult(type, html) {
     area.style.cssText = `display:block;padding:.75rem;border-radius:6px;font-size:.87rem;background:${c.bg};border:1px solid ${c.border};color:${c.color};`;
     area.innerHTML = html;
 }
+
 

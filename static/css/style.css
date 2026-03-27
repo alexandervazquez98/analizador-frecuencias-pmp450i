@@ -1,4 +1,4 @@
-/* Reset y Variables */
+ï»¿/* Reset y Variables */
 :root {
     --primary-color: #2196F3;
     --accent-color: #2196F3;
@@ -900,7 +900,7 @@ details summary:hover {
 }
 
 /* ==============================================================
-   REDESIGN: ap-sm-autodiscovery — App Shell + Premium UX
+   REDESIGN: ap-sm-autodiscovery ï¿½ App Shell + Premium UX
    ============================================================== */
 
 /* -- Design tokens extras --------------------------------------- */
@@ -979,7 +979,6 @@ details summary:hover {
 .recent-item { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; font-size:0.78rem; border-bottom:1px solid rgba(255,255,255,0.04); cursor:pointer; transition:background 0.15s; }
 .recent-item:last-child { border-bottom:none; }
 .recent-item:hover { background:rgba(255,255,255,0.05); }
-.recent-item .ri-id { color:var(--accent-purple); font-weight:600; }
 .recent-item .ri-date { color:var(--text-muted); }
 .recent-item .ri-mode { font-size:0.7rem; color:var(--accent-green); }
 
