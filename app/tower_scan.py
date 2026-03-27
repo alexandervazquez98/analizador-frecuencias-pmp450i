@@ -4,6 +4,7 @@ Utiliza SNMP para orquestar escaneos de espectro simultáneos
 """
 
 import asyncio
+import re
 import time
 import os
 from dataclasses import dataclass
@@ -11,6 +12,10 @@ from typing import List, Dict, Tuple, Optional
 from pysnmp.hlapi import *
 from pysnmp.proto.rfc1902 import Integer32, OctetString
 import logging
+
+# Regex para validar IPs v4 — usado en discovery para filtrar valores binarios
+# que pysnmp puede retornar cuando str() se aplica sobre IpAddress objects.
+_IPV4_RE = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
 
 from app.freq_utils import format_scan_list
 
@@ -1121,7 +1126,10 @@ class TowerScanner:
                     value = varBind[1]
                     try:
                         luid = int(oid_str.split(".")[-1])
-                        result[luid] = str(value)
+                        # Usar prettyPrint() para que IpAddress renderice como
+                        # dotted-decimal (10.53.5.79) en lugar de bytes raw
+                        # (ï¿½5Oï¿½). str() sobre IpAddress en pysnmp devuelve bytes ASCII.
+                        result[luid] = value.prettyPrint()
                     except (ValueError, IndexError):
                         continue
         except Exception as e:
@@ -1183,6 +1191,15 @@ class TowerScanner:
             sm_ip = ip_map.get(luid, "")
             mac = mac_map.get(luid, "")
             site_name = name_map.get(luid, f"SM-LUID-{luid}")
+
+            # Validar que sm_ip sea una IP v4 real (descarta basura binaria
+            # que pysnmp puede devolver si prettyPrint() falla o el OID
+            # retorna un tipo inesperado)
+            if not sm_ip or not _IPV4_RE.match(sm_ip):
+                logger.warning(
+                    f"[DISCOVERY] LUID {luid}: IP invalida '{sm_ip}' — omitido"
+                )
+                continue
 
             results.append(
                 SMDiscoveryResult(
