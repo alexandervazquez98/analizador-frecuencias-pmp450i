@@ -26,7 +26,7 @@ from functools import wraps
 import asyncio
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict
 import logging
 import os
@@ -220,7 +220,7 @@ def start_scan(audit_manager=None):
         # Register in in-memory hot cache
         active_scans[scan_id] = {
             "task": task,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "ap_ips": ap_ips,
             "sm_ips": sm_ips,
             "snmp_communities": snmp_communities,
@@ -510,7 +510,7 @@ def health_check():
     return jsonify(
         {
             "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "active_scans": len(active_scans),
         }
     )

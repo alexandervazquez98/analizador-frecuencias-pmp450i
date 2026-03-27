@@ -10,7 +10,7 @@ Design: change-005 design § D4.5 — Scan Module Split
 import asyncio
 import threading
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from app.tower_scan import TowerScanner
@@ -62,7 +62,7 @@ class ScanTask:
 
     def log(self, msg: str, level: str = "info"):
         """Log message to console and internal buffer."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
         self.logs.append({"ts": timestamp, "msg": msg, "type": level})
 
         log_msg = f"[{self.scan_id}] {msg}"
@@ -603,7 +603,7 @@ class ScanTask:
             # Compilar resultados finales
             self.results = {
                 "scan_id": self.scan_id,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "analysis_mode": self.analysis_mode,
                 "ap_count": len(self.ap_ips),
                 "sm_count": len(self.sm_ips),
