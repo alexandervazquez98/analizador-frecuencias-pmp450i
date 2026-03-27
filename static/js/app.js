@@ -257,7 +257,8 @@ async function startScan() {
         snmp_community: elements.snmpCommunity ? elements.snmpCommunity.value : '',
         config: {
             target_rx_level: parseFloat(elements.targetRxLevel ? elements.targetRxLevel.value : '-52'),
-            channel_width: channelWidth
+            channel_width: channelWidth,
+            min_snr: parseFloat(elements.minSnr ? elements.minSnr.value : '18'),
         }
     };
 
@@ -523,7 +524,8 @@ function renderInstallationSheet(results) {
         const estadoLabel = f.Estado ?? (f['V\u00e1lido'] === 'S\u00ed' ? 'Viable' : 'No Viable');
         const isViable = estadoLabel === 'Viable' && throughput >= requiredThroughput;
         const rowClass = isViable ? 'table-success' : '';
-        const snr = f['SNR Estimado (dB)'] || 0;
+        const snrAP = f['SNR Estimado AP (dB)'] ?? f['SNR Estimado (dB)'] ?? '\u2014';
+        const snrSM = f['Peor SNR SM (dB)'] != null ? `${Number(f['Peor SNR SM (dB)']).toFixed(1)} dB` : '\u2014';
         // Dual-key: 'Frecuencia Central (MHz)' (AP_ONLY) vs 'Frecuencia (MHz)' (AP_SM_CROSS)
         const freq = f['Frecuencia Central (MHz)'] ?? f['Frecuencia (MHz)'] ?? '\u2014';
         // Dual-key: 'Ancho Banda (MHz)' (AP_ONLY) vs 'Ancho (MHz)' (AP_SM_CROSS)
@@ -537,7 +539,8 @@ function renderInstallationSheet(results) {
                 <td class="${throughput >= requiredThroughput ? 'text-success' : 'text-danger'} fw-bold">
                     ${throughput >= requiredThroughput ? 'CUMPLE' : 'INSUFICIENTE'}
                 </td>
-                <td>${snr} dB</td>
+                <td>${snrAP} dB</td>
+                <td class="${f['Peor SNR SM (dB)'] != null && f['Peor SNR SM (dB)'] < 18 ? 'text-danger fw-bold' : 'text-success'}">${snrSM}</td>
                 <td><span class="badge bg-${estadoLabel === 'Viable' ? 'success' : 'danger'}">${estadoLabel}</span></td>
             </tr>
         `;
@@ -596,7 +599,8 @@ function renderInstallationSheet(results) {
                             <th>Ancho</th>
                             <th>Capacidad Est.</th>
                             <th>Status Req.</th>
-                            <th>SNR Est.</th>
+                            <th>SNR AP Est.</th>
+                            <th>Peor SNR SM</th>
                             <th>Viabilidad RF</th>
                         </tr>
                     </thead>
@@ -627,7 +631,9 @@ function renderAPCard(ip, analysis) {
         qualityClass = best.is_viable ? 'excellent' : 'poor';
         qualityLabel = best.is_viable ? 'VIABLE' : 'NO VIABLE';
         metricScore = best.combined_score != null ? Number(best.combined_score).toFixed(2) : '\u2014';
-        metricNoise = best.sm_avg_noise != null ? `${Number(best.sm_avg_noise).toFixed(1)} dBm` : '\u2014';
+        // change-007: mostrar peor SNR real entre SMs (más informativo que ruido bruto)
+        const smSnrWorst = best.sm_snr_worst != null ? `${Number(best.sm_snr_worst).toFixed(1)} dB` : '\u2014';
+        metricNoise = smSnrWorst;
     } else if (!isCross && analysis.best_frequency) {
         const best = analysis.best_frequency;
         bestFreqMhz = best['Frecuencia Central (MHz)'];
@@ -692,7 +698,7 @@ function renderAPCard(ip, analysis) {
             ${freqDisplay}
             <div class="arc-metrics">
                 <div class="arc-metric"><div class="arc-metric-val">${metricScore}</div><div class="arc-metric-lbl">Score</div></div>
-                <div class="arc-metric"><div class="arc-metric-val">${metricNoise}</div><div class="arc-metric-lbl">${isCross ? 'Ruido SMs' : 'SNR Est.'}</div></div>
+                <div class="arc-metric"><div class="arc-metric-val">${metricNoise}</div><div class="arc-metric-lbl">${isCross ? 'Peor SNR SM' : 'SNR Est.'}</div></div>
                 <div class="arc-metric"><div class="arc-metric-val">${metricPoints}</div><div class="arc-metric-lbl">Puntos RF</div></div>
             </div>
             ${smSection}
