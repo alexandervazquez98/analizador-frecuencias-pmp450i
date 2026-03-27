@@ -333,13 +333,14 @@ class ScanTask:
             logger.info(f"[{self.scan_id}] Analizando frecuencias...")
 
             target_rx = self.config.get("target_rx_level", -52)
+            min_snr = float(self.config.get("min_snr", 18))
             analysis_results = {}
 
             if self.analysis_mode == "AP_SM_CROSS" and sm_xmls:
                 # ANALISIS CRUZADO AP-SM
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
-                cross_analyzer = APSMCrossAnalyzer()
+                cross_analyzer = APSMCrossAnalyzer(min_snr=min_snr)
                 freq_analyzer = FrequencyAnalyzer()
 
                 for i, ap_ip in enumerate(completed_aps):
@@ -461,6 +462,7 @@ class ScanTask:
                                 sm_data,
                                 top_n=20,
                                 min_channel_width=self.config.get("min_channel_width", 15),
+                                target_rx_level=float(target_rx),
                             )
                         )
 
@@ -521,6 +523,7 @@ class ScanTask:
                                 "combined_score": best_combined.combined_score,
                                 "sm_worst_noise": best_combined.sm_worst_noise,
                                 "sm_avg_noise": best_combined.sm_avg_noise,
+                                "sm_snr_worst": best_combined.sm_snr_worst,
                                 "is_viable": best_combined.is_viable,
                                 "veto_reason": best_combined.veto_reason,
                                 "quality_level": best_combined.quality_level,
