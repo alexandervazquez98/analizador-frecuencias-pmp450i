@@ -1,23 +1,23 @@
 /**
  * Tower Scan Automation - Frontend JavaScript
- * Maneja la interfaz web, comunicaciÃ³n con API y visualizaciÃ³n de datos
+ * Maneja la interfaz web, comunicaci\u00f3n con API y visualizaci\u00f3n de datos
  */
 
-// Estado de la aplicaciÃ³n
+// Estado de la aplicaci\u00f3n
 const appState = {
     currentScanId: null,
     pollInterval: null,
     scanResults: null,
     lastLogCount: 0,
-    // Log auto-scroll state (T4 â€” frontend-responsive-ux)
-    logUserScrolled: false,  // true si el usuario scrolleÃ³ hacia arriba
-    logNewLinesCount: 0,     // lÃ­neas nuevas pendientes de ver
+    // Log auto-scroll state (T4 \u2014 frontend-responsive-ux)
+    logUserScrolled: false,  // true si el usuario scrolle\u00f3 hacia arriba
+    logNewLinesCount: 0,     // l\u00edneas nuevas pendientes de ver
 };
 
 // Referencias a elementos DOM
 let elements = {};
 
-// ==================== INICIALIZACIÃ“N ====================
+// ==================== INICIALIZACI\u00d3N ====================
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -80,16 +80,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configurar event listeners
     setupEventListeners();
 
-    // Cargar configuraciÃ³n desde .env (vÃ­a /api/config) y luego historial
+    // Cargar configuraci\u00f3n desde .env (v\u00eda /api/config) y luego historial
     loadConfigDefaults();
     loadRecentScans();
 });
 
-// ==================== CARGA DE CONFIGURACIÃ“N (.env) ====================
+// ==================== CARGA DE CONFIGURACI\u00d3N (.env) ====================
 
 async function loadConfigDefaults() {
     /**
-     * Carga los defaults de configuraciÃ³n desde el servidor (/api/config)
+     * Carga los defaults de configuraci\u00f3n desde el servidor (/api/config)
      * que a su vez los lee del archivo .env.
      * Esto elimina todos los valores hardcodeados en el frontend.
      */
@@ -154,27 +154,27 @@ function setupEventListeners() {
     // Discovery button
     if (elements.discoverBtn) elements.discoverBtn.addEventListener('click', runDiscovery);
 
-    // Log scroll listener â€” detecta si el usuario scrollÃ³ hacia arriba
+    // Log scroll listener \u2014 detecta si el usuario scroll\u00f3 hacia arriba
     if (elements.logOutput) {
         elements.logOutput.addEventListener('scroll', () => {
             if (isLogAtBottom()) {
-                // Usuario volviÃ³ al fondo â€” reanudar auto-scroll y ocultar badge
+                // Usuario volvi\u00f3 al fondo \u2014 reanudar auto-scroll y ocultar badge
                 appState.logUserScrolled = false;
                 appState.logNewLinesCount = 0;
                 updateLogBadge(0);
             } else {
-                // Usuario scrollÃ³ hacia arriba
+                // Usuario scroll\u00f3 hacia arriba
                 appState.logUserScrolled = true;
             }
         });
     }
 }
 
-// ==================== LOG HELPERS (T4 â€” frontend-responsive-ux) ====================
+// ==================== LOG HELPERS (T4 \u2014 frontend-responsive-ux) ====================
 
 /**
- * Devuelve true si el panel de log estÃ¡ scrolleado al fondo (threshold: 10px).
- * O(1) â€” no usa observers.
+ * Devuelve true si el panel de log est\u00e1 scrolleado al fondo (threshold: 10px).
+ * O(1) \u2014 no usa observers.
  */
 function isLogAtBottom() {
     if (!elements.logOutput) return true;
@@ -184,7 +184,7 @@ function isLogAtBottom() {
 
 /**
  * Actualiza la visibilidad y texto del badge #logNewLinesBadge.
- * @param {number} count â€” 0 para ocultar el badge.
+ * @param {number} count \u2014 0 para ocultar el badge.
  */
 function updateLogBadge(count) {
     if (!elements.logNewLinesBadge) return;
@@ -211,7 +211,7 @@ function setupFileUpload(fileInput, targetTextarea, type) {
                 targetTextarea.value = current ? current + '\n' + ips.join('\n') : ips.join('\n');
                 showPanelAlert('scanAlert', `Se cargaron ${ips.length} IPs de ${type} correctamente.`, 'success');
             } else {
-                showPanelAlert('scanAlert', 'No se encontraron IPs vÃ¡lidas en el archivo.', 'warning');
+                showPanelAlert('scanAlert', 'No se encontraron IPs v\u00e1lidas en el archivo.', 'warning');
             }
             fileInput.value = ''; // Reset
         } catch (error) {
@@ -220,7 +220,7 @@ function setupFileUpload(fileInput, targetTextarea, type) {
     });
 }
 
-// ==================== LÃ“GICA PRINCIPAL ====================
+// ==================== L\u00d3GICA PRINCIPAL ====================
 
 /**
  * Wrapper for fetch that handles 401 (unauthorized) by redirecting to /login.
@@ -244,12 +244,12 @@ async function startScan() {
 
     const ticketId = elements.ticketId ? parseInt(elements.ticketId.value) : null;
     if (!ticketId || ticketId <= 0) {
-        showScanAlert('Debe ingresar un Ticket ID vÃ¡lido (nÃºmero entero positivo).', 'warning');
+        showScanAlert('Debe ingresar un Ticket ID v\u00e1lido (n\u00famero entero positivo).', 'warning');
         return;
     }
 
     const channelWidth = parseInt(elements.channelWidth ? elements.channelWidth.value : '20');
-    // SMs are auto-discovered in the backend (Fase 0.5 â€” ap-sm-autodiscovery)
+    // SMs are auto-discovered in the backend (Fase 0.5 \u2014 ap-sm-autodiscovery)
     const scanData = {
         ap_ips: apIPs,
         sm_ips: [],
@@ -289,7 +289,7 @@ async function startScan() {
         if (elements.scanIdDisplay) elements.scanIdDisplay.textContent = result.scan_id;
 
         addLogEntry(`Scan ID: ${result.scan_id}`, 'success');
-        addLogEntry(`Objetivo: ${result.ap_count} APs â€” SMs via SNMP auto-discovery`, 'info');
+        addLogEntry(`Objetivo: ${result.ap_count} APs \u2014 SMs via SNMP auto-discovery`, 'info');
 
         appState.lastLogCount = 0;
         startPolling();
@@ -298,7 +298,7 @@ async function startScan() {
         console.error(error);
         addLogEntry(`Error fatal: ${error.message}`, 'error');
         elements.startScanBtn.disabled = false;
-        elements.startScanBtn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Iniciar AnÃ¡lisis';
+        elements.startScanBtn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Iniciar An\u00e1lisis';
     }
 }
 
@@ -336,7 +336,7 @@ async function checkStatus() {
             displayResults(status.results);
         } else if (status.status === 'failed') {
             clearInterval(appState.pollInterval);
-            addLogEntry(`FallÃ³ el escaneo: ${status.error}`, 'error');
+            addLogEntry(`Fall\u00f3 el escaneo: ${status.error}`, 'error');
             elements.startScanBtn.disabled = false;
             elements.startScanBtn.innerHTML = '<i class="bi bi-broadcast"></i> Iniciar Tower Scan';
         }
@@ -345,7 +345,7 @@ async function checkStatus() {
     }
 }
 
-// ==================== VISUALIZACIÃ“N DE RESULTADOS ====================
+// ==================== VISUALIZACI\u00d3N DE RESULTADOS ====================
 
 function displayResults(results) {
     appState.scanResults = results;
@@ -369,7 +369,7 @@ function displayResults(results) {
         }
     }
     const mode = results.analysis_mode === 'AP_SM_CROSS' ? 'AP-SM Cross' : 'AP Only';
-    const ts = results.timestamp ? new Date(results.timestamp).toLocaleTimeString() : 'â€”';
+    const ts = results.timestamp ? new Date(results.timestamp).toLocaleTimeString() : '\u2014';
 
     if (elements.resultsSummary) {
         elements.resultsSummary.innerHTML = `
@@ -437,8 +437,8 @@ function renderInstallationSheet(results) {
     const smCount = results.completed_sms || results.sm_count || 0;
 
     // Calcular requerimiento de capacidad:
-    // EstimaciÃ³n: 5 Mbps por cÃ¡mara/SM es un estÃ¡ndar seguro para CCTV HD/4K (H.265)
-    // No sumamos buffer extra por AP, el usuario quiere cÃ¡lculo puro por SMs.
+    // Estimaci\u00f3n: 5 Mbps por c\u00e1mara/SM es un est\u00e1ndar seguro para CCTV HD/4K (H.265)
+    // No sumamos buffer extra por AP, el usuario quiere c\u00e1lculo puro por SMs.
     const requiredThroughput = Math.max(5, smCount * 5); // Al menos 5 Mbps si hay 1 SM
 
     // 2. Obtener pool de frecuencias (Top 50)
@@ -451,14 +451,14 @@ function renderInstallationSheet(results) {
         // Fallback para analisis solo AP
         for (const [ip, analysis] of Object.entries(results.analysis_results)) {
             // Este caso es complejo porque analyzer no devuelve ranking raw aqui, 
-            // pero para esta iteraciÃ³n asumimos que si es cross analysis tenemos combined_ranking
+            // pero para esta iteraci\u00f3n asumimos que si es cross analysis tenemos combined_ranking
             if (analysis.combined_ranking) freqPool = analysis.combined_ranking;
         }
     }
 
     // Si aun esta vacio (caso AP Only legacy?), intentamos construir algo
     if (!freqPool || freqPool.length === 0) {
-        container.innerHTML = '<div class="alert alert-warning">No hay datos suficientes para generar la ficha de instalaciÃ³n (Falta Ranking).</div>';
+        container.innerHTML = '<div class="alert alert-warning">No hay datos suficientes para generar la ficha de instalaci\u00f3n (Falta Ranking).</div>';
         return;
     }
 
@@ -478,13 +478,13 @@ function renderInstallationSheet(results) {
     // let recommendedBW = "N/A"; // This line was duplicated, removed.
 
     // Filtramos candidatos viables con suficiente throughput
-    // Soporte dual de keys: AP_ONLY usa 'VÃ¡lido'='SÃ­', AP_SM_CROSS usa 'Estado'='Viable'
+    // Soporte dual de keys: AP_ONLY usa 'V\u00e1lido'='S\u00ed', AP_SM_CROSS usa 'Estado'='Viable'
     const validCandidates = freqPool.filter(c => {
-        const isViable = c.Estado === 'Viable' || c['VÃ¡lido'] === 'SÃ­';
+        const isViable = c.Estado === 'Viable' || c['V\u00e1lido'] === 'S\u00ed';
         return isViable && (c['Throughput Est. (Mbps)'] || 0) >= requiredThroughput;
     });
 
-    // Si hay candidatos vÃ¡lidos, buscamos el Ã³ptimo
+    // Si hay candidatos v\u00e1lidos, buscamos el \u00f3ptimo
     if (validCandidates.length > 0) {
         // Ordenar primero por Ancho (ASCII sort works for 10, 20... wait, need numeric sort)
         // Ascendente en ancho, Descendente en Score
@@ -507,7 +507,7 @@ function renderInstallationSheet(results) {
 
         recommendedBW = `<span class="text-success fw-bold">${width} MHz</span> <small>(Soporta ${cap} Mbps > ${requiredThroughput} Mbps req.)</small>`;
     } else {
-        // Fallback: Si NINGUNO cumple, mostramos el que mÃ¡s se acerca (mayor throughput)
+        // Fallback: Si NINGUNO cumple, mostramos el que m\u00e1s se acerca (mayor throughput)
         const bestFallback = freqPool.slice().sort((a, b) => (b['Throughput Est. (Mbps)'] || 0) - (a['Throughput Est. (Mbps)'] || 0))[0];
         if (bestFallback) {
             const cap = bestFallback['Throughput Est. (Mbps)'] || 0;
@@ -519,15 +519,15 @@ function renderInstallationSheet(results) {
     // 3. Renderizar vista
     let poolRows = topCandidates.map(f => {
         const throughput = f['Throughput Est. (Mbps)'] || 0;
-        // Dual-key support: AP_ONLY usa 'VÃ¡lido'='SÃ­', AP_SM_CROSS usa 'Estado'='Viable'
-        const estadoLabel = f.Estado ?? (f['VÃ¡lido'] === 'SÃ­' ? 'Viable' : 'No Viable');
+        // Dual-key support: AP_ONLY usa 'V\u00e1lido'='S\u00ed', AP_SM_CROSS usa 'Estado'='Viable'
+        const estadoLabel = f.Estado ?? (f['V\u00e1lido'] === 'S\u00ed' ? 'Viable' : 'No Viable');
         const isViable = estadoLabel === 'Viable' && throughput >= requiredThroughput;
         const rowClass = isViable ? 'table-success' : '';
         const snr = f['SNR Estimado (dB)'] || 0;
         // Dual-key: 'Frecuencia Central (MHz)' (AP_ONLY) vs 'Frecuencia (MHz)' (AP_SM_CROSS)
-        const freq = f['Frecuencia Central (MHz)'] ?? f['Frecuencia (MHz)'] ?? 'â€”';
+        const freq = f['Frecuencia Central (MHz)'] ?? f['Frecuencia (MHz)'] ?? '\u2014';
         // Dual-key: 'Ancho Banda (MHz)' (AP_ONLY) vs 'Ancho (MHz)' (AP_SM_CROSS)
-        const ancho = f['Ancho Banda (MHz)'] ?? f['Ancho (MHz)'] ?? 'â€”';
+        const ancho = f['Ancho Banda (MHz)'] ?? f['Ancho (MHz)'] ?? '\u2014';
 
         return `
             <tr class="${rowClass}">
@@ -548,7 +548,7 @@ function renderInstallationSheet(results) {
             <!-- Params Card -->
             <div class="col-md-6">
                 <div class="card bg-dark text-light border-light h-100">
-                    <div class="card-header border-light"><i class="bi bi-sliders"></i> ParÃ¡metros de ConfiguraciÃ³n</div>
+                    <div class="card-header border-light"><i class="bi bi-sliders"></i> Par\u00e1metros de Configuraci\u00f3n</div>
                     <div class="card-body">
                         <ul class="list-group list-group-flush bg-dark text-light">
                              <li class="list-group-item bg-dark text-light d-flex justify-content-between">
@@ -571,7 +571,7 @@ function renderInstallationSheet(results) {
              <!-- Capacity Card -->
             <div class="col-md-6">
                 <div class="card bg-dark text-light border-light h-100">
-                    <div class="card-header border-light"><i class="bi bi-speedometer2"></i> AnÃ¡lisis de Capacidad</div>
+                    <div class="card-header border-light"><i class="bi bi-speedometer2"></i> An\u00e1lisis de Capacidad</div>
                     <div class="card-body text-center">
                         <h6 class="text-muted">Requerimiento Calculado (${smCount} SMs x 5Mbps)</h6>
                         <h2 class="display-6 text-warning mb-3">${requiredThroughput} Mbps</h2>
@@ -606,7 +606,7 @@ function renderInstallationSheet(results) {
                 </table>
             </div>
             <div class="card-footer border-secondary text-muted small">
-                * Capacidad estimada teÃ³rica basada en SNR y ModulaciÃ³n. Realizar prueba de link test.
+                * Capacidad estimada te\u00f3rica basada en SNR y Modulaci\u00f3n. Realizar prueba de link test.
             </div>
         </div>
     `;
@@ -615,7 +615,7 @@ function renderAPCard(ip, analysis) {
     const isCross = analysis.mode === 'AP_SM_CROSS';
     let bestFreqMhz = null, bwMhz = null;
     let qualityClass = 'none', qualityLabel = 'N/A';
-    let metricScore = 'â€”', metricNoise = 'â€”';
+    let metricScore = '\u2014', metricNoise = '\u2014';
     let metricPoints = analysis.spectrum_points || 0;
     let applyBtn = '';
     const isViewer = (window.userRole === 'viewer');
@@ -626,17 +626,17 @@ function renderAPCard(ip, analysis) {
         bwMhz = best.channel_width || best.bandwidth || 20;
         qualityClass = best.is_viable ? 'excellent' : 'poor';
         qualityLabel = best.is_viable ? 'VIABLE' : 'NO VIABLE';
-        metricScore = best.combined_score != null ? Number(best.combined_score).toFixed(2) : 'â€”';
-        metricNoise = best.sm_avg_noise != null ? `${Number(best.sm_avg_noise).toFixed(1)} dBm` : 'â€”';
+        metricScore = best.combined_score != null ? Number(best.combined_score).toFixed(2) : '\u2014';
+        metricNoise = best.sm_avg_noise != null ? `${Number(best.sm_avg_noise).toFixed(1)} dBm` : '\u2014';
     } else if (!isCross && analysis.best_frequency) {
         const best = analysis.best_frequency;
         bestFreqMhz = best['Frecuencia Central (MHz)'];
         bwMhz = best['Ancho Banda (MHz)'] || 20;
-        const qMap = { 'EXCELENTE': 'excellent', 'BUENO': 'good', 'ACEPTABLE': 'fair', 'MARGINAL': 'fair', 'CRÃTICO': 'poor' };
+        const qMap = { 'EXCELENTE': 'excellent', 'BUENO': 'good', 'ACEPTABLE': 'fair', 'MARGINAL': 'fair', 'CR\u00cdTICO': 'poor' };
         qualityClass = qMap[best.quality_level] || 'none';
         qualityLabel = best.quality_level || 'N/A';
-        metricScore = best['Puntaje Final'] != null ? String(best['Puntaje Final']) : 'â€”';
-        metricNoise = best['SNR Estimado (dB)'] != null ? `${best['SNR Estimado (dB)']} dB` : 'â€”';
+        metricScore = best['Puntaje Final'] != null ? String(best['Puntaje Final']) : '\u2014';
+        metricNoise = best['SNR Estimado (dB)'] != null ? `${best['SNR Estimado (dB)']} dB` : '\u2014';
     }
 
     if (!isViewer && bestFreqMhz) {
@@ -652,7 +652,7 @@ function renderAPCard(ip, analysis) {
                 : ((analysis.best_frequency?.['Puntaje Final'] || 0) / 200).toFixed(2);
             const isViable = isCross
                 ? (analysis.best_combined_frequency?.is_viable || false)
-                : (analysis.best_frequency?.['VÃ¡lido'] === 'SÃ­');
+                : (analysis.best_frequency?.['V\u00e1lido'] === 'S\u00ed');
             const rankingJson = escapeAttr(JSON.stringify(ranking.slice(0, 20)));
             applyBtn = `<button type="button" class="btn-glass btn-sm-g"
                 id="applyBtn-${ip.replace(/\./g, '-')}"
@@ -680,7 +680,7 @@ function renderAPCard(ip, analysis) {
 
     const freqDisplay = bestFreqMhz
         ? `<div class="arc-best-freq"><span class="arc-freq-value">${bestFreqMhz}</span><span class="arc-freq-unit">MHz</span>${bwMhz ? `<span class="arc-freq-bw">/ ${bwMhz} MHz BW</span>` : ''}</div>`
-        : `<div class="scan-alert warning" style="margin:8px 0;"><i class="bi bi-exclamation-triangle"></i> Sin frecuencias vÃ¡lidas</div>`;
+        : `<div class="scan-alert warning" style="margin:8px 0;"><i class="bi bi-exclamation-triangle"></i> Sin frecuencias v\u00e1lidas</div>`;
 
     return `
     <div class="ap-result-card">
@@ -723,8 +723,8 @@ function renderErrorCard(ip, error) {
 // ==================== VISOR DE ESPECTRO (CHART.JS) ====================
 
 const CHART_COLORS = [
-    '#FF5722', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', // CÃ¡lidos/Vibrantes
-    '#00BCD4', '#009688', '#4CAF50', '#8BC34A', '#CDDC39'  // FrÃ­os/Natura
+    '#FF5722', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', // C\u00e1lidos/Vibrantes
+    '#00BCD4', '#009688', '#4CAF50', '#8BC34A', '#CDDC39'  // Fr\u00edos/Natura
 ];
 
 function openSpectrumViewer(ip) {
@@ -745,7 +745,7 @@ function openSpectrumViewer(ip) {
 
 function openGlobalSpectrumViewer() {
     if (!appState.scanResults || !appState.scanResults.analysis_results) {
-        showPanelAlert('scanAlert', 'No hay resultados de anÃ¡lisis disponibles.', 'warning');
+        showPanelAlert('scanAlert', 'No hay resultados de an\u00e1lisis disponibles.', 'warning');
         return;
     }
 
@@ -774,7 +774,7 @@ function updateStatusBadge(status) {
         'scanning': 'Escaneando espectro...',
         'analyzing': 'Analizando frecuencias...',
         'completed': 'âœ“ Completado',
-        'failed': 'âœ— Error'
+        'failed': '\u2713 Error'
     };
     elements.statusBadge.textContent = map[status] || status;
     setStepperState(status);
@@ -858,7 +858,7 @@ function clearForm() {
     if (elements.ticketId) elements.ticketId.value = '';
     if (elements.startScanBtn) {
         elements.startScanBtn.disabled = true;
-        elements.startScanBtn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Iniciar AnÃ¡lisis';
+        elements.startScanBtn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Iniciar An\u00e1lisis';
     }
     if (elements.logOutput) elements.logOutput.innerHTML = '';
     // Reset discovery section
@@ -872,9 +872,9 @@ function parseIPList(text) {
 
     return text.split(/[\n,]+/)
         .map(t => t.split('#')[0].trim()) // Eliminar comentarios y espacios
-        .filter(t => t.length > 0) // Quitar lÃ­neas vacÃ­as
+        .filter(t => t.length > 0) // Quitar l\u00edneas vac\u00edas
         .filter(t =>
-            // Regex bÃ¡sico de IP
+            // Regex b\u00e1sico de IP
             /^(\d{1,3}\.){3}\d{1,3}$/.test(t)
         );
 }
@@ -967,7 +967,7 @@ function exportResults() {
 async function runDiscovery() {
     const apIPs = parseIPList(elements.apIPs ? elements.apIPs.value : '');
     if (apIPs.length === 0) {
-        showScanAlert('IngresÃ¡ al menos una IP de AP antes de descubrir SMs.', 'warning');
+        showScanAlert('Ingres\u00e1 al menos una IP de AP antes de descubrir SMs.', 'warning');
         return;
     }
     if (elements.discoverBtn) {
@@ -993,9 +993,9 @@ async function runDiscovery() {
 
         const totalSMs = Object.values(data).reduce((acc, sms) => acc + sms.filter(sm => sm.ip).length, 0);
         if (totalSMs > 0) {
-            showScanAlert(`Discovery completado â€” ${totalSMs} SM(s) en ${Object.keys(data).length} AP(s).`, 'success');
+            showScanAlert(`Discovery completado \u2014 ${totalSMs} SM(s) en ${Object.keys(data).length} AP(s).`, 'success');
         } else {
-            showScanAlert('Sin SMs activos â€” el anÃ¡lisis correrÃ¡ en modo AP-Only.', 'warning');
+            showScanAlert('Sin SMs activos \u2014 el an\u00e1lisis correr\u00e1 en modo AP-Only.', 'warning');
         }
         if (elements.startScanBtn) elements.startScanBtn.disabled = false;
 
@@ -1102,7 +1102,7 @@ function escapeAttr(str) {
 // ==================== APPLY FREQUENCY MODAL (Tarea 4.2 + 4.3) ====================
 
 /**
- * Estado interno del modal de aplicaciÃ³n de frecuencia.
+ * Estado interno del modal de aplicaci\u00f3n de frecuencia.
  */
 const _applyModal = {
     scanId: null,
@@ -1110,15 +1110,15 @@ const _applyModal = {
     freqMhz: null,
     isViable: null,
     score: null,
-    ranking: [],       // Top-20 frecuencias del anÃ¡lisis
+    ranking: [],       // Top-20 frecuencias del an\u00e1lisis
     freqMin: 3400,
     freqMax: 6000,
-    recommendedBw: 20, // Ancho de canal recomendado por el anÃ¡lisis
+    recommendedBw: 20, // Ancho de canal recomendado por el an\u00e1lisis
     submitting: false,
 };
 
 /**
- * Inyecta el modal de apply-frequency en el DOM si no existe todavÃ­a.
+ * Inyecta el modal de apply-frequency en el DOM si no existe todav\u00eda.
  */
 function _ensureApplyModal() {
     if (document.getElementById('applyFreqModal')) return;
@@ -1138,7 +1138,7 @@ function _ensureApplyModal() {
             <div style="margin-bottom:.75rem;">
                 <label for="applySelectFreq" style="font-size:.85rem;color:#aaa;">
                     <i class="bi bi-broadcast" style="color:#ffc107;"></i>
-                    Frecuencia (MHz) <span style="color:#555;font-size:.78rem;">Top-20 del anÃ¡lisis</span>
+                    Frecuencia (MHz) <span style="color:#555;font-size:.78rem;">Top-20 del an\u00e1lisis</span>
                 </label>
                 <select id="applySelectFreq"
                     onchange="_onApplyFreqChange(this.value)"
@@ -1150,7 +1150,7 @@ function _ensureApplyModal() {
             <div style="margin-bottom:.75rem;">
                 <label for="applySelectBw" style="font-size:.85rem;color:#aaa;">
                     <i class="bi bi-arrows-expand"></i>
-                    Ancho de Canal <span style="color:#555;font-size:.78rem;">(se aplicarÃ¡ vÃ­a SNMP)</span>
+                    Ancho de Canal <span style="color:#555;font-size:.78rem;">(se aplicar\u00e1 v\u00eda SNMP)</span>
                 </label>
                 <select id="applySelectBw"
                     style="width:100%;padding:.4rem .7rem;background:#2a2a3e;border:1px solid #555;border-radius:6px;color:#fff;font-size:.95rem;">
@@ -1166,7 +1166,7 @@ function _ensureApplyModal() {
             <!-- Info fija -->
             <div style="margin-bottom:.75rem;padding:.5rem .75rem;background:#16161f;border-radius:6px;font-size:.8rem;color:#888;">
                 <i class="bi bi-info-circle"></i>
-                Al aplicar tambiÃ©n se configurarÃ¡: <strong style="color:#aaa;">Contention Slots = 4</strong> &amp; <strong style="color:#aaa;">Broadcast Retry = 0</strong>
+                Al aplicar tambi\u00e9n se configurar\u00e1: <strong style="color:#aaa;">Contention Slots = 4</strong> &amp; <strong style="color:#aaa;">Broadcast Retry = 0</strong>
             </div>
 
             <!-- Tower ID -->
@@ -1226,7 +1226,7 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
         // Fallback: solo la frecuencia recomendada
         const opt = document.createElement('option');
         opt.value = freqMhz;
-        opt.textContent = `${freqMhz} MHz â€” Recomendada`;
+        opt.textContent = `${freqMhz} MHz \u2014 Recomendada`;
         freqSelect.appendChild(opt);
     } else {
         top20.forEach((item, idx) => {
@@ -1236,8 +1236,8 @@ function openApplyModal(scanId, apIp, freqMhz, score, isViable, freqMin, freqMax
 
             const isRec = fMhz == freqMhz;
             const label = isRec
-                ? `â˜… ${fMhz} MHz â€” ${bw ? bw + 'MHz BW | ' : ''}Score: ${score} (Recomendada)`
-                : `${String(idx + 1).padStart(2, '0')}. ${fMhz} MHz â€” ${bw ? bw + 'MHz BW | ' : ''}Score: ${score}`;
+                ? `â˜… ${fMhz} MHz \u2014 ${bw ? bw + 'MHz BW | ' : ''}Score: ${score} (Recomendada)`
+                : `${String(idx + 1).padStart(2, '0')}. ${fMhz} MHz \u2014 ${bw ? bw + 'MHz BW | ' : ''}Score: ${score}`;
             const opt = document.createElement('option');
             opt.value = fMhz;
             if (isRec) opt.selected = true;
@@ -1302,7 +1302,7 @@ function closeApplyModal() {
 }
 
 /**
- * Tarea 4.3: EnvÃ­a POST /api/apply-frequency y muestra resultado inline.
+ * Tarea 4.3: Env\u00eda POST /api/apply-frequency y muestra resultado inline.
  */
 async function submitApplyFrequency() {
     if (_applyModal.submitting) return;
@@ -1317,7 +1317,7 @@ async function submitApplyFrequency() {
     // Leer ancho de canal del dropdown
     const channelWidthMhz = parseInt(document.getElementById('applySelectBw').value, 10);
 
-    // tower_id es opcional â€” si el usuario no lo llena se envÃ­a null
+    // tower_id es opcional \u2014 si el usuario no lo llena se env\u00eda null
     const towerId = (document.getElementById('applyInputTower').value || '').trim() || null;
     const forceCheck = document.getElementById('applyForceCheck');
     const force = !!(forceCheck && forceCheck.checked);
@@ -1359,10 +1359,10 @@ async function submitApplyFrequency() {
 
             if (state === 'completed') {
                 let detail = `Frecuencia <strong>${freqResult} MHz${bwResult}</strong> aplicada correctamente`;
-                if (smErrors.length > 0) detail += `<br><small style="color:#ffc107;"><i class="bi bi-exclamation-triangle"></i> ${smErrors.length} SM(s) con errores â€” AP OK</small>`;
+                if (smErrors.length > 0) detail += `<br><small style="color:#ffc107;"><i class="bi bi-exclamation-triangle"></i> ${smErrors.length} SM(s) con errores \u2014 AP OK</small>`;
                 detail += `<br><small style="color:#aaa;">${extraOk}</small>`;
                 if (data.reboot_ok !== false) {
-                    detail += `<br><small style="color:#6edff6;"><i class="bi bi-arrow-clockwise"></i> El equipo estÃ¡ reiniciando (~30-60 s de inactividad)</small>`;
+                    detail += `<br><small style="color:#6edff6;"><i class="bi bi-arrow-clockwise"></i> El equipo est\u00e1 reiniciando (~30-60 s de inactividad)</small>`;
                 }
                 showApplyResult('success', `<i class="bi bi-check-circle-fill"></i> <strong>Completado</strong> (apply_id=${applyId})<br>${detail}`);
             } else {
