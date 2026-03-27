@@ -323,8 +323,8 @@ async function checkStatus() {
             if (status.logs.length > appState.lastLogCount) {
                 const newLogs = status.logs.slice(appState.lastLogCount);
                 newLogs.forEach(log => {
-                    // Usar el tipo que viene del backend o default a info
-                    addLogEntry(log.msg, log.type || 'info');
+                    // Usar timestamp del servidor (log.ts) para trazabilidad exacta
+                    addLogEntry(log.msg, log.type || 'info', false, log.ts);
                 });
                 appState.lastLogCount = status.logs.length;
             }
@@ -806,13 +806,18 @@ function setStepperState(status) {
     });
 }
 
-function addLogEntry(msg, type = 'info', detailed = false) {
+function addLogEntry(msg, type = 'info', detailed = false, serverTs = null) {
     if (!elements.logOutput) return;
     if (detailed && elements.detailedLogToggle && !elements.detailedLogToggle.checked) return;
 
+    // Prefer server timestamp (backend UTC) when available, fallback to browser local time
+    const tsDisplay = serverTs
+        ? `[${serverTs}]`
+        : `[${new Date().toLocaleTimeString()}]`;
+
     const line = document.createElement('div');
     line.className = `log-line ${type}`;
-    line.innerHTML = `<span class="log-ts">[${new Date().toLocaleTimeString()}]</span><span class="log-msg">${msg}</span>`;
+    line.innerHTML = `<span class="log-ts">${tsDisplay}</span><span class="log-msg">${msg}</span>`;
     elements.logOutput.appendChild(line);
 
     // Auto-scroll inteligente
