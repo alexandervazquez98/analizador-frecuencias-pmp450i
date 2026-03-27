@@ -6,12 +6,31 @@ Utiliza SNMP para orquestar escaneos de espectro simultáneos
 import asyncio
 import time
 import os
-from typing import List, Dict, Tuple
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional
 from pysnmp.hlapi import *
 from pysnmp.proto.rfc1902 import Integer32, OctetString
 import logging
 
 from app.freq_utils import format_scan_list
+
+
+@dataclass
+class SMDiscoveryResult:
+    """Resultado del auto-discovery SNMP de un SM registrado en un AP.
+
+    Campos obtenidos del linkTable del AP (OID base: 1.3.6.1.4.1.161.19.3.1.4.1):
+      luid      — Logical Unit ID asignado por el AP (entero, empieza en 2)
+      ip        — IP de gestión del SM (linkManagementIP .69)
+      mac       — MAC address del SM (linkPhysAddress .3)
+      site_name — Nombre del sitio configurado en el SM (linkSiteName .33)
+      state     — Estado de sesión (linkSessState .19): 1 = IN SESSION
+    """
+    luid: int
+    ip: str
+    mac: str
+    site_name: str
+    state: int
 
 # Logger del módulo (configuración centralizada en app/__init__.py)
 logger = logging.getLogger(__name__)
@@ -1046,6 +1065,141 @@ class TowerScanner:
             msg = str(e)
             self._log(f"[APPLY] {ip}: Excepción reboot_if_required — {msg}", "error")
             return False, msg
+
+    # =========================================================================
+    # MÉTODOS DE AUTO-DISCOVERY (change: ap-sm-autodiscovery)
+    # =========================================================================
+
+    def _snmp_walk_oid(
+        self, ap_ip: str, base_oid: str, community: str
+    ) -> Dict[int, str]:
+        """SNMP WALK sobre un OID base del linkTable del AP.
+
+        Itera con GETNEXT hasta salir del subárbol (lexicographicMode=False).
+        Extrae el LUID del último componente del OID resultante.
+
+        Args:
+            ap_ip:    IP del Access Point a consultar.
+            base_oid: OID raíz del WALK (e.g. '1.3.6.1.4.1.161.19.3.1.4.1.69').
+            community: Comunidad SNMP de lectura.
+
+        Returns:
+            Dict[luid, value_str] — valor como string para cada LUID encontrado.
+        """
+        result: Dict[int, str] = {}
+        try:
+            for (
+                errorIndication,
+                errorStatus,
+                errorIndex,
+                varBinds,
+            ) in nextCmd(
+                SnmpEngine(),
+                CommunityData(community, mpModel=1),
+                UdpTransportTarget(
+                    (ap_ip, 161),
+                    timeout=self.SNMP_TIMEOUT,
+                    retries=self.SNMP_RETRIES,
+                ),
+                ContextData(),
+                ObjectType(ObjectIdentity(base_oid)),
+                lexicographicMode=False,  # Detener al salir del subárbol
+            ):
+                if errorIndication:
+                    logger.warning(
+                        f"[DISCOVERY] WALK {base_oid} en {ap_ip}: {errorIndication}"
+                    )
+                    break
+                if errorStatus:
+                    logger.warning(
+                        f"[DISCOVERY] WALK {base_oid} en {ap_ip}: "
+                        f"{errorStatus.prettyPrint()}"
+                    )
+                    break
+                for varBind in varBinds:
+                    oid_str = str(varBind[0])
+                    value = varBind[1]
+                    try:
+                        luid = int(oid_str.split(".")[-1])
+                        result[luid] = str(value)
+                    except (ValueError, IndexError):
+                        continue
+        except Exception as e:
+            logger.warning(f"[DISCOVERY] Excepción WALK {base_oid} en {ap_ip}: {e}")
+        return result
+
+    async def discover_registered_sms_from_ap(
+        self, ap_ip: str
+    ) -> List[SMDiscoveryResult]:
+        """Descubre los SMs registrados en un AP vía SNMP WALK sobre linkTable.
+
+        Realiza WALK sobre 4 OIDs en paralelo (asyncio.gather) todos indexados
+        por LUID. Solo retorna SMs con linkSessState == 1 (IN SESSION).
+
+        OIDs del linkTable (base: 1.3.6.1.4.1.161.19.3.1.4.1):
+          .19 — linkSessState  (1 = IN SESSION)
+          .69 — linkManagementIP
+          .3  — linkPhysAddress (MAC)
+          .33 — linkSiteName
+
+        Args:
+            ap_ip: IP del Access Point.
+
+        Returns:
+            Lista de SMDiscoveryResult con state == 1. Lista vacía si el AP
+            no tiene SMs registrados o no responde.
+        """
+        BASE = "1.3.6.1.4.1.161.19.3.1.4.1"
+        OID_STATE = f"{BASE}.19"
+        OID_IP = f"{BASE}.69"
+        OID_MAC = f"{BASE}.3"
+        OID_NAME = f"{BASE}.33"
+
+        community = self._get_community(ap_ip)
+
+        self._log(
+            f"[DISCOVERY] {ap_ip}: WALK linkTable (state/ip/mac/site_name)..."
+        )
+
+        # WALK los 4 OIDs en paralelo — todos independientes entre sí
+        state_map, ip_map, mac_map, name_map = await asyncio.gather(
+            asyncio.to_thread(self._snmp_walk_oid, ap_ip, OID_STATE, community),
+            asyncio.to_thread(self._snmp_walk_oid, ap_ip, OID_IP, community),
+            asyncio.to_thread(self._snmp_walk_oid, ap_ip, OID_MAC, community),
+            asyncio.to_thread(self._snmp_walk_oid, ap_ip, OID_NAME, community),
+        )
+
+        results: List[SMDiscoveryResult] = []
+        for luid, state_raw in state_map.items():
+            try:
+                state = int(state_raw)
+            except (ValueError, TypeError):
+                continue
+
+            # Filtrar solo SMs activos (IN SESSION = 1)
+            if state != 1:
+                continue
+
+            sm_ip = ip_map.get(luid, "")
+            mac = mac_map.get(luid, "")
+            site_name = name_map.get(luid, f"SM-LUID-{luid}")
+
+            results.append(
+                SMDiscoveryResult(
+                    luid=luid,
+                    ip=sm_ip,
+                    mac=mac,
+                    site_name=site_name,
+                    state=state,
+                )
+            )
+
+        self._log(
+            f"[DISCOVERY] {ap_ip}: {len(results)} SMs activos encontrados "
+            f"(de {len(state_map)} LUIDs en linkTable)",
+            "success" if results else "warning",
+        )
+        return results
 
     def run_scan(self) -> Dict[str, Dict]:
         """Ejecutar Tower Scan (wrapper síncrono).
