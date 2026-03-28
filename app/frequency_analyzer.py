@@ -103,7 +103,12 @@ class FrequencyAnalyzer:
 
     # Configuración de ventana deslizante
     DEFAULT_CHANNEL_WIDTH = 20  # MHz - Ancho de banda por defecto
-    SLIDING_STEP = 5  # MHz - Paso de la ventana deslizante
+    # Paso de la ventana deslizante: 1.25 MHz = mitad de la resolución del XML del PMP450i
+    # (que muestrea cada 2.5 MHz). Este es el paso más fino con sentido físico: a cada
+    # incremento de 1.25 MHz, al menos un punto de medición entra o sale de la ventana,
+    # permitiendo encontrar frecuencias centrales que esquivan picos angostos de interferencia.
+    # Impacto: ~4x más candidatos evaluados vs. 5 MHz (aceptable, todo en memoria).
+    SLIDING_STEP = 1.25  # MHz - Mínimo útil dado resolución de 2.5 MHz del instrumento
 
     # Bonificaciones por Eficiencia Espectral
     # Lógica: preferir el menor BW que cumpla la demanda del sector.
@@ -633,7 +638,8 @@ class FrequencyAnalyzer:
 
         # Generar candidatos con ventana deslizante
         results = []
-        center = freq_min + (width / 2)
+        # round() inicial: evita trailing decimals en freq_min + width/2
+        center = round(freq_min + (width / 2), 3)
 
         while center + (width / 2) <= freq_max:
             score = self.calculate_frequency_score(
@@ -665,7 +671,9 @@ class FrequencyAnalyzer:
                 }
             )
 
-            center += self.SLIDING_STEP
+            # round() en cada paso: previene drift acumulativo de IEEE 754 float
+            # con sumas repetidas de 1.25 (e.g. 4900.0 + 1.25×80 → 4999.9999...)
+            center = round(center + self.SLIDING_STEP, 3)
 
         # Crear DataFrame y ordenar por puntaje
         df = pd.DataFrame(results)
