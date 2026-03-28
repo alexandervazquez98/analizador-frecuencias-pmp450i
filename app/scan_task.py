@@ -519,6 +519,8 @@ class ScanTask:
                             "best_combined_frequency": {
                                 "frequency": best_combined.frequency,
                                 "bandwidth": best_combined.bandwidth,
+                                "channel_width": best_combined.bandwidth,  # alias para el frontend
+                                "throughput_est": best_combined.throughput_est,
                                 "ap_score": best_combined.ap_score,
                                 "combined_score": best_combined.combined_score,
                                 "sm_worst_noise": best_combined.sm_worst_noise,

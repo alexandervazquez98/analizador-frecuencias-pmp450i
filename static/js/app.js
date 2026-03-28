@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Tower Scan Automation - Frontend JavaScript
  * Maneja la interfaz web, comunicaci\u00f3n con API y visualizaci\u00f3n de datos
  */
@@ -626,7 +626,7 @@ function renderAPCard(ip, analysis) {
     const isCross = analysis.mode === 'AP_SM_CROSS';
     let bestFreqMhz = null, bwMhz = null;
     let qualityClass = 'none', qualityLabel = 'N/A';
-    let metricScore = '\u2014', metricNoise = '\u2014';
+    let metricScore = '\u2014', metricNoise = '\u2014', metricThroughput = '\u2014';
     let metricPoints = analysis.spectrum_points || 0;
     let applyBtn = '';
     const isViewer = (window.userRole === 'viewer');
@@ -641,6 +641,7 @@ function renderAPCard(ip, analysis) {
         // change-007: mostrar peor SNR real entre SMs (más informativo que ruido bruto)
         const smSnrWorst = best.sm_snr_worst != null ? `${Number(best.sm_snr_worst).toFixed(1)} dB` : '\u2014';
         metricNoise = smSnrWorst;
+        metricThroughput = best.throughput_est != null ? `${Number(best.throughput_est).toFixed(0)} Mbps` : '\u2014';
     } else if (!isCross && analysis.best_frequency) {
         const best = analysis.best_frequency;
         bestFreqMhz = best['Frecuencia Central (MHz)'];
@@ -706,6 +707,7 @@ function renderAPCard(ip, analysis) {
             <div class="arc-metrics">
                 <div class="arc-metric"><div class="arc-metric-val">${metricScore}</div><div class="arc-metric-lbl">Score</div></div>
                 <div class="arc-metric"><div class="arc-metric-val">${metricNoise}</div><div class="arc-metric-lbl">${isCross ? 'Peor SNR SM' : 'SNR Est.'}</div></div>
+                ${isCross ? `<div class="arc-metric"><div class="arc-metric-val">${metricThroughput}</div><div class="arc-metric-lbl">Throughput Est.</div></div>` : ''}
                 <div class="arc-metric"><div class="arc-metric-val">${metricPoints}</div><div class="arc-metric-lbl">Puntos RF</div></div>
             </div>
             ${smSection}
