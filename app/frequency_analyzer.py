@@ -110,6 +110,10 @@ class FrequencyAnalyzer:
     # Impacto: ~4x más candidatos evaluados vs. 5 MHz (aceptable, todo en memoria).
     SLIDING_STEP = 1.25  # MHz - Mínimo útil dado resolución de 2.5 MHz del instrumento
 
+    # Rangos de banda PMP450i - 3GHz: 3300-3987 MHz
+    BAND_3GHZ_MIN = 3300  # MHz - Límite inferior banda 3GHz
+    BAND_3GHZ_MAX = 3987  # MHz - Límite superior banda 3GHz
+
     # Bonificaciones por Eficiencia Espectral
     # Lógica: preferir el menor BW que cumpla la demanda del sector.
     # Rango operativo estándar: 15-20 MHz.
@@ -118,11 +122,11 @@ class FrequencyAnalyzer:
     # penalización para que solo ganen si la calidad RF es significativamente
     # superior a las opciones de 15-20 MHz.
     BW_EFFICIENCY_BONUS = {
-        5:  -10,  # Penalización: solo usar si min_channel_width < 15 y no hay alternativa
-        10:  -5,  # Penalización leve: válido en escenarios muy congestionados
-        15:   5,  # Preferencia leve sobre 20 MHz (mismo throughput útil, menor huella espectral)
-        20:   0,  # Línea base
-        30:  -5,  # Penalizar uso excesivo de espectro
+        5: -10,  # Penalización: solo usar si min_channel_width < 15 y no hay alternativa
+        10: -5,  # Penalización leve: válido en escenarios muy congestionados
+        15: 5,  # Preferencia leve sobre 20 MHz (mismo throughput útil, menor huella espectral)
+        20: 0,  # Línea base
+        30: -5,  # Penalizar uso excesivo de espectro
         40: -10,
     }
 
@@ -140,8 +144,12 @@ class FrequencyAnalyzer:
         self.channel_width = int(
             self.config.get("channel_width", self.DEFAULT_CHANNEL_WIDTH)
         )
+        # Configuración de rango de banda 3GHz (None = sin filtro)
+        self.band_3ghz_min = self.config.get("band_3ghz_min")
+        self.band_3ghz_max = self.config.get("band_3ghz_max")
         logger.info(
-            f"FrequencyAnalyzer inicializado: TargetRx={self.target_rx_level}dBm, Width={self.channel_width}MHz"
+            f"FrequencyAnalyzer inicializado: TargetRx={self.target_rx_level}dBm, Width={self.channel_width}MHz, "
+            f"3GHz Range={self.band_3ghz_min}-{self.band_3ghz_max}MHz"
         )
 
     def _estimate_throughput(
@@ -632,6 +640,18 @@ class FrequencyAnalyzer:
         freq_min = min(p.frequency for p in spectrum_points)
         freq_max = max(p.frequency for p in spectrum_points)
 
+        # Aplicar filtro de banda 3GHz solo si está configurado
+        if self.band_3ghz_min is not None and self.band_3ghz_max is not None:
+            freq_min = max(freq_min, self.band_3ghz_min)
+            freq_max = min(freq_max, self.band_3ghz_max)
+
+            if freq_min > freq_max:
+                logger.warning(
+                    f"Rango válido vacío tras aplicar filtro 3GHz ({self.band_3ghz_min}-{self.band_3ghz_max} MHz). "
+                    f"XML contiene {min(p.frequency for p in spectrum_points):.1f}-{max(p.frequency for p in spectrum_points):.1f} MHz"
+                )
+                return pd.DataFrame()
+
         logger.info(
             f"Analizando espectro {freq_min:.1f} - {freq_max:.1f} MHz con ventana deslizante de {width} MHz"
         )
@@ -729,9 +749,7 @@ class FrequencyAnalyzer:
             )
         elif is_valid and snr >= 10:
             quality = "MARGINAL"
-            warnings.append(
-                f"SNR marginal ({snr:.1f} dB) - Enlace puede ser inestable"
-            )
+            warnings.append(f"SNR marginal ({snr:.1f} dB) - Enlace puede ser inestable")
             warnings.append(f"Modulación limitada a {modulation}")
             if chain_imbalance > 3:
                 warnings.append(
@@ -754,9 +772,7 @@ class FrequencyAnalyzer:
                 )
                 recommendations.append("URGENTE: Verificar y realinear antenas")
             if not is_valid:
-                warnings.append(
-                    "Frecuencia no cumple criterios mínimos de operación"
-                )
+                warnings.append("Frecuencia no cumple criterios mínimos de operación")
 
             recommendations.append("🚨 ACCIÓN INMEDIATA REQUERIDA:")
             recommendations.append(
