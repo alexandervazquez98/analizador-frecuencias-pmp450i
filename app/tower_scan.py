@@ -15,7 +15,7 @@ import logging
 
 # Regex para validar IPs v4 — usado en discovery para filtrar valores binarios
 # que pysnmp puede retornar cuando str() se aplica sobre IpAddress objects.
-_IPV4_RE = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+_IPV4_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 from app.freq_utils import format_scan_list
 
@@ -31,11 +31,13 @@ class SMDiscoveryResult:
       site_name — Nombre del sitio configurado en el SM (linkSiteName .33)
       state     — Estado de sesión (linkSessState .19): 1 = IN SESSION
     """
+
     luid: int
     ip: str
     mac: str
     site_name: str
     state: int
+
 
 # Logger del módulo (configuración centralizada en app/__init__.py)
 logger = logging.getLogger(__name__)
@@ -52,7 +54,9 @@ class TowerScanner:
 
     # OIDs para aplicación de frecuencia (change-006)
     RF_FREQ_CARRIER_OID = "1.3.6.1.4.1.161.19.3.1.1.2.0"  # AP — Integer32, kHz
-    RF_SCAN_LIST_OID = "1.3.6.1.4.1.161.19.3.2.1.1.0"  # SM — OctetString, kHz separado por coma
+    RF_SCAN_LIST_OID = (
+        "1.3.6.1.4.1.161.19.3.2.1.1.0"  # SM — OctetString, kHz separado por coma
+    )
 
     # Valores de control
     SET_FULL_SCAN = 8
@@ -384,9 +388,11 @@ class TowerScanner:
 
         start_time = time.time()
         consecutive_errors = 0
+        snmp_errors = 0
 
-        # Mayor tolerancia para SMs que suelen desconectarse al escanear
-        max_consecutive_errors = 15 if device_type == "SM" else 5
+        # SMs no responden a SNMP mientras escanean espectro (comportamiento normal Cambium)
+        # NO cuenta como error - solo esperamos hasta que respondan otimeout global
+        max_consecutive_errors = 5 if device_type == "AP" else 999999  # SMs = infinito
 
         while (time.time() - start_time) < max_wait:
             # Usar STATUS OID para verificar estado
@@ -396,12 +402,23 @@ class TowerScanner:
 
             if not success:
                 consecutive_errors += 1
-                self._log(
-                    f"[{device_type}] {ip}: Error verificando estado ({consecutive_errors}/{max_consecutive_errors}) - {msg}",
-                    "warning",
-                )
+                snmp_errors += 1
 
-                if device_type == "SM" and consecutive_errors < max_consecutive_errors:
+                # Para SMs, solo loguear cada N errores para no saturar logs
+                if device_type == "SM" and snmp_errors % 10 == 1:
+                    elapsed = int(time.time() - start_time)
+                    self._log(
+                        f"[{device_type}] {ip}: Sin respuesta SNMP ({elapsed}s) - SM en modo espectro (normal)",
+                        "info",
+                    )
+                elif device_type == "AP":
+                    self._log(
+                        f"[{device_type}] {ip}: Error verificando estado ({consecutive_errors}/{max_consecutive_errors}) - {msg}",
+                        "warning",
+                    )
+
+                if device_type == "SM":
+                    # SMs: esperar sin importar timeouts (es normal que no respondan)
                     await asyncio.sleep(check_interval)
                     continue
                 elif consecutive_errors >= max_consecutive_errors:
@@ -416,6 +433,7 @@ class TowerScanner:
                 continue
 
             consecutive_errors = 0
+            snmp_errors = 0
 
             # Loggear estado cada vez para depuración
             if int(time.time()) % 5 == 0:
@@ -438,8 +456,18 @@ class TowerScanner:
             # Si devuelve 1 (Active), seguimos esperando
             await asyncio.sleep(check_interval)
 
-        result["message"] = f"Timeout esperando completar escaneo ({max_wait}s)"
-        self._log(f"[{device_type}] {ip}: Timeout ({max_wait}s)", "error")
+        elapsed = time.time() - start_time
+        if device_type == "SM":
+            # SM puede no haber terminado de reportar estado cuando el AP ya terminó
+            result["completed"] = True
+            result["message"] = f"Escaneo AP finalizado ({elapsed:.1f}s)"
+            self._log(
+                f"[{device_type}] {ip}: Timeout pero escaneo completado",
+                "info",
+            )
+        else:
+            result["message"] = f"Timeout esperando completar escaneo ({max_wait}s)"
+            self._log(f"[{device_type}] {ip}: Timeout ({max_wait}s)", "error")
         return result
 
     async def validate_and_filter_devices(
@@ -515,7 +543,7 @@ class TowerScanner:
         # Validar APs
         if self.ap_ips:
             self._log(
-                f"Validando acceso a {len(self.ap_ips)} APs (Probando {len(self.snmp_communities)} comunidades)..."
+                f"[FASE 0-AUTH] Validando acceso a {len(self.ap_ips)} APs (timeout=5s, retries=2)..."
             )
             tasks = [find_working_community(ip) for ip in self.ap_ips]
             results = await asyncio.gather(*tasks)
@@ -526,11 +554,13 @@ class TowerScanner:
                     self.device_community_map[ip] = comm
                 else:
                     errors[ip] = msg
-                    logger.warning(f"[OMITIDO] AP {ip}: {msg}")
+                    logger.warning(f"[FASE 0-AUTH][OMITIDO] AP {ip}: {msg}")
 
         # Validar SMs
         if self.sm_ips:
-            self._log(f"Validando acceso a {len(self.sm_ips)} SMs...")
+            self._log(
+                f"[FASE 0-AUTH] Validando acceso a {len(self.sm_ips)} SMs (timeout=5s, retries=2)..."
+            )
             tasks = [find_working_community(ip) for ip in self.sm_ips]
             results = await asyncio.gather(*tasks)
 
@@ -540,7 +570,7 @@ class TowerScanner:
                     self.device_community_map[ip] = comm
                 else:
                     errors[ip] = msg
-                    logger.warning(f"[OMITIDO] SM {ip}: {msg}")
+                    logger.warning(f"[FASE 0-AUTH][OMITIDO] SM {ip}: {msg}")
 
         return valid_aps, valid_sms, errors
 
@@ -563,7 +593,9 @@ class TowerScanner:
         # =========================================================================
         active_sms_prepared = []
         if valid_sms:
-            self._log(f"--- FASE 1: Preparando {len(valid_sms)} SMs ---")
+            self._log(
+                f"[FASE 1-PREP] Preparando {len(valid_sms)} SMs (timeout=8s, retries=3)..."
+            )
             prep_tasks = [self._prepare_scan_async(ip, "SM") for ip in valid_sms]
             prep_results = await asyncio.gather(*prep_tasks)
 
@@ -592,7 +624,7 @@ class TowerScanner:
         # =========================================================================
         active_sms_started = []
         if active_sms_prepared:
-            self._log("--- FASE 2: Iniciando Escaneo en SMs (Sincronizado) ---")
+            self._log("[FASE 2-START] Iniciando escaneo en SMs (sincronizado)...")
             # Pequeña pausa para asegurar que todos procesaron la preparación
             await asyncio.sleep(1)
 
@@ -630,7 +662,7 @@ class TowerScanner:
         # =========================================================================
         active_aps = []
         if valid_aps:
-            self._log("--- FASE 3: Iniciando AP ---")
+            self._log("[FASE 3-AP] Iniciando AP...")
             # Usar prepare + start para AP también por consistencia, o el helper viejo
             # Usaremos el flow directo
             for ip in valid_aps:
@@ -652,7 +684,7 @@ class TowerScanner:
             return results
 
         self._log(
-            f"Esperando finalización ({len(active_aps)} APs, {len(active_sms_started)} SMs)..."
+            f"[FASE 4-WAIT] Esperando completación: {len(active_aps)} AP(s), {len(active_sms_started)} SMs (intervalo={self.SM_STATUS_CHECK_INTERVAL}s)..."
         )
 
         # 4. Esperar finalización
@@ -666,10 +698,41 @@ class TowerScanner:
 
         scan_completion_results = await asyncio.gather(*wait_tasks)
 
+        completed_sms = []
+        failed_sms_results = []
         for res in scan_completion_results:
             results[res["ip"]] = res
+            if res.get("device_type") == "SM":
+                if res.get("completed"):
+                    completed_sms.append(res["ip"])
+                else:
+                    failed_sms_results.append(res["ip"])
 
-        self._log("Tower Scan finalizado.")
+        expected_sms_count = len(active_sms_started)
+        actual_sms_count = len(completed_sms)
+
+        if actual_sms_count < expected_sms_count:
+            missing = expected_sms_count - actual_sms_count
+            pct = (missing / expected_sms_count * 100) if expected_sms_count > 0 else 0
+
+            if pct > 20:
+                self._log(
+                    f"ALERTA: Solo {actual_sms_count}/{expected_sms_count} SMs completaron escaneo ({pct:.0f}% falla)",
+                    "error",
+                )
+                self._log(
+                    f"SMs que no completaron: {failed_sms_results[:5]}...",
+                    "warning",
+                )
+            else:
+                self._log(
+                    f"WARNING: {actual_sms_count}/{expected_sms_count} SMs completaron ({pct:.0f}% no respondió)",
+                    "warning",
+                )
+
+        self._log(
+            f"Tower Scan finalizado: {len(completed_sms)} SMs, {len(active_aps)} AP(s)"
+        )
         return results
 
     def _snmp_get_oid_raw(
@@ -795,7 +858,9 @@ class TowerScanner:
                     (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
                 ),
                 ContextData(),
-                ObjectType(ObjectIdentity(self.RF_FREQ_CARRIER_OID), Integer32(freq_khz)),
+                ObjectType(
+                    ObjectIdentity(self.RF_FREQ_CARRIER_OID), Integer32(freq_khz)
+                ),
             )
 
             errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
@@ -850,17 +915,15 @@ class TowerScanner:
         )
 
         if success:
-            self._log(
-                f"[APPLY] {ip}: SET rfScanList OK — '{scan_list_str}'", "info"
-            )
+            self._log(f"[APPLY] {ip}: SET rfScanList OK — '{scan_list_str}'", "info")
         else:
-            self._log(
-                f"[APPLY] {ip}: FALLÓ set_sm_scan_list — {msg}", "error"
-            )
+            self._log(f"[APPLY] {ip}: FALLÓ set_sm_scan_list — {msg}", "error")
 
         return success, msg
 
-    def set_channel_width(self, ip: str, width_mhz: int, ap_freq_mhz: float = None) -> Tuple[bool, str]:
+    def set_channel_width(
+        self, ip: str, width_mhz: int, ap_freq_mhz: float = None
+    ) -> Tuple[bool, str]:
         """SET channel bandwidth on AP via SNMP.
 
         OID priority (confirmed by Cambium MIB field testing):
@@ -892,14 +955,13 @@ class TowerScanner:
         bw_int = BW_INT_MAP.get(int(width_mhz))
         if bw_int is None:
             return False, (
-                f"Ancho de canal {width_mhz} MHz no soportado. "
-                f"Válidos: {valid_bws}"
+                f"Ancho de canal {width_mhz} MHz no soportado. Válidos: {valid_bws}"
             )
 
         # OID 1: OctetString — único con SET confirmado por Cambium
-        CHANNEL_BW_OID_STR = "1.3.6.1.4.1.161.19.3.3.2.83.0"   # channelBandwidth.0
+        CHANNEL_BW_OID_STR = "1.3.6.1.4.1.161.19.3.3.2.83.0"  # channelBandwidth.0
         # OID 2: Integer fallback — mapa universal
-        CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"   # bandwidth.0
+        CHANNEL_BW_OID_INT = "1.3.6.1.4.1.161.19.3.3.2.91.0"  # bandwidth.0
         bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz", "7.0 MHz", etc.
 
         self._log(
@@ -930,7 +992,9 @@ class TowerScanner:
             iterator = setCmd(
                 SnmpEngine(),
                 CommunityData(self.write_community, mpModel=1),
-                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                UdpTransportTarget(
+                    (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
+                ),
                 ContextData(),
                 ObjectType(ObjectIdentity(CHANNEL_BW_OID_INT), Integer32(bw_int)),
             )
@@ -943,7 +1007,9 @@ class TowerScanner:
                 )
                 return True, "OK (via .91.0)"
             msg = f"SNMP Error: {errInd or errStat.prettyPrint()}"
-            self._log(f"[APPLY] {ip}: FALLÓ ambos OIDs de channelBandwidth — {msg}", "error")
+            self._log(
+                f"[APPLY] {ip}: FALLÓ ambos OIDs de channelBandwidth — {msg}", "error"
+            )
             return False, msg
         except Exception as e:
             msg = str(e)
@@ -962,28 +1028,41 @@ class TowerScanner:
         Returns:
             Tuple (success: bool, message: str).
         """
-        CONTENTION_OID_PRIMARY = "1.3.6.1.4.1.161.19.3.1.1.42.0"   # numCtlSlotsHW.0
-        CONTENTION_OID_ALT     = "1.3.6.1.4.1.161.19.3.1.10.1.1.4.1"  # radioControlSlots.1
+        CONTENTION_OID_PRIMARY = "1.3.6.1.4.1.161.19.3.1.1.42.0"  # numCtlSlotsHW.0
+        CONTENTION_OID_ALT = "1.3.6.1.4.1.161.19.3.1.10.1.1.4.1"  # radioControlSlots.1
         VALUE = 4
 
-        self._log(f"[APPLY] {ip}: SET numCtlSlotsHW = {VALUE} (contention slots)", "info")
+        self._log(
+            f"[APPLY] {ip}: SET numCtlSlotsHW = {VALUE} (contention slots)", "info"
+        )
 
-        for oid, label in [(CONTENTION_OID_PRIMARY, "primary"), (CONTENTION_OID_ALT, "alt")]:
+        for oid, label in [
+            (CONTENTION_OID_PRIMARY, "primary"),
+            (CONTENTION_OID_ALT, "alt"),
+        ]:
             try:
                 iterator = setCmd(
                     SnmpEngine(),
                     CommunityData(self.write_community, mpModel=1),
-                    UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                    UdpTransportTarget(
+                        (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
+                    ),
                     ContextData(),
                     ObjectType(ObjectIdentity(oid), Integer32(VALUE)),
                 )
                 errInd, errStat, _, _ = next(iterator)
                 if not errInd and not errStat:
-                    self._log(f"[APPLY] {ip}: SET contention_slots=4 OK (OID {label})", "info")
+                    self._log(
+                        f"[APPLY] {ip}: SET contention_slots=4 OK (OID {label})", "info"
+                    )
                     return True, "OK"
-                self._log(f"[APPLY] {ip}: OID {label} falló ({errInd or errStat})", "warning")
+                self._log(
+                    f"[APPLY] {ip}: OID {label} falló ({errInd or errStat})", "warning"
+                )
             except Exception as e:
-                self._log(f"[APPLY] {ip}: Excepción contention OID {label} — {e}", "warning")
+                self._log(
+                    f"[APPLY] {ip}: Excepción contention OID {label} — {e}", "warning"
+                )
 
         return False, "FALLÓ SET contention_slots en todos los OIDs"
 
@@ -1009,7 +1088,9 @@ class TowerScanner:
             iterator = setCmd(
                 SnmpEngine(),
                 CommunityData(self.write_community, mpModel=1),
-                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                UdpTransportTarget(
+                    (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
+                ),
                 ContextData(),
                 ObjectType(ObjectIdentity(BROADCAST_OID), Integer32(VALUE)),
             )
@@ -1047,12 +1128,17 @@ class TowerScanner:
         REBOOT_OID = "1.3.6.1.4.1.161.19.3.3.3.4.0"  # rebootIfRequired.0
         VALUE = 1
 
-        self._log(f"[APPLY] {ip}: SET rebootIfRequired = {VALUE} (reinicio condicional)", "info")
+        self._log(
+            f"[APPLY] {ip}: SET rebootIfRequired = {VALUE} (reinicio condicional)",
+            "info",
+        )
         try:
             iterator = setCmd(
                 SnmpEngine(),
                 CommunityData(self.write_community, mpModel=1),
-                UdpTransportTarget((ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES),
+                UdpTransportTarget(
+                    (ip, 161), timeout=self.SNMP_TIMEOUT, retries=self.SNMP_RETRIES
+                ),
                 ContextData(),
                 ObjectType(ObjectIdentity(REBOOT_OID), Integer32(VALUE)),
             )
@@ -1165,9 +1251,7 @@ class TowerScanner:
 
         community = self._get_community(ap_ip)
 
-        self._log(
-            f"[DISCOVERY] {ap_ip}: WALK linkTable (state/ip/mac/site_name)..."
-        )
+        self._log(f"[DISCOVERY] {ap_ip}: WALK linkTable (state/ip/mac/site_name)...")
 
         # WALK los 4 OIDs en paralelo — todos independientes entre sí
         state_map, ip_map, mac_map, name_map = await asyncio.gather(
