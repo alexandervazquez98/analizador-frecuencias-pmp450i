@@ -588,6 +588,20 @@ class TowerScanner:
             self._log("No hay APs válidos.", "error")
             return results
 
+        # CANDADO 0: Todos los SMs descubiertos deben responder SNMP
+        # Si hay SMs que no respondieron en AUTH, abortar
+        if errors:
+            failed_auth = list(errors.keys())
+            self._log(
+                f"ABORTO DE SEGURIDAD (Fase 0): {len(failed_auth)} SMs no respondieron SNMP: {failed_auth}",
+                "error",
+            )
+            self._log(
+                f"Se requieren {len(valid_sms) + len(failed_auth)} SMs operativos, pero solo {len(valid_sms)} respondieron.",
+                "warning",
+            )
+            return results
+
         # =========================================================================
         # FASE 1: PREPARACIÓN DE SMs (Configurar Modo)
         # =========================================================================
