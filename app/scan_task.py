@@ -150,8 +150,10 @@ class ScanTask:
                 log_callback=self.log,
             )
 
-            ap_sm_map: Dict[str, List[str]] = {}       # {ap_ip: [sm_ip, ...]}
-            ap_sm_site_names: Dict[str, Dict[str, str]] = {}  # {ap_ip: {sm_ip: site_name}}
+            ap_sm_map: Dict[str, List[str]] = {}  # {ap_ip: [sm_ip, ...]}
+            ap_sm_site_names: Dict[
+                str, Dict[str, str]
+            ] = {}  # {ap_ip: {sm_ip: site_name}}
 
             for ap_ip in self.ap_ips:
                 try:
@@ -162,8 +164,12 @@ class ScanTask:
                     }
                     # Guardar en self para incluir en resultados finales
                     self.ap_sm_discovery[ap_ip] = [
-                        {"luid": sm.luid, "ip": sm.ip, "mac": sm.mac,
-                         "site_name": sm.site_name}
+                        {
+                            "luid": sm.luid,
+                            "ip": sm.ip,
+                            "mac": sm.mac,
+                            "site_name": sm.site_name,
+                        }
                         for sm in sms
                     ]
                     if sms:
@@ -175,7 +181,9 @@ class ScanTask:
                     else:
                         self.log(f"  AP {ap_ip}: sin SMs activos", "warning")
                 except Exception as disc_err:
-                    self.log(f"  AP {ap_ip}: error en discovery — {disc_err}", "warning")
+                    self.log(
+                        f"  AP {ap_ip}: error en discovery — {disc_err}", "warning"
+                    )
                     ap_sm_map[ap_ip] = []
                     ap_sm_site_names[ap_ip] = {}
 
@@ -192,9 +200,7 @@ class ScanTask:
                     "success",
                 )
             else:
-                self.log(
-                    "No se encontraron SMs activos — modo AP_ONLY", "warning"
-                )
+                self.log("No se encontraron SMs activos — modo AP_ONLY", "warning")
                 self.analysis_mode = "AP_ONLY"
 
             # Fase 1: Tower Scan (SNMP)
@@ -341,7 +347,9 @@ class ScanTask:
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
                 cross_analyzer = APSMCrossAnalyzer(min_snr=min_snr)
-                freq_analyzer = FrequencyAnalyzer()
+                freq_analyzer = FrequencyAnalyzer(
+                    config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+                )
 
                 for i, ap_ip in enumerate(completed_aps):
                     if ap_ip not in ap_xmls:
@@ -461,7 +469,9 @@ class ScanTask:
                                 ap_spectrum,
                                 sm_data,
                                 top_n=20,
-                                min_channel_width=self.config.get("min_channel_width", 15),
+                                min_channel_width=self.config.get(
+                                    "min_channel_width", 15
+                                ),
                                 target_rx_level=float(target_rx),
                             )
                         )
@@ -509,7 +519,9 @@ class ScanTask:
                             "sm_details": [
                                 {
                                     "ip": sm.ip,
-                                    "site_name": site_names_for_this_ap.get(sm.ip, sm.ip),
+                                    "site_name": site_names_for_this_ap.get(
+                                        sm.ip, sm.ip
+                                    ),
                                 }
                                 for sm in sm_data
                             ],
@@ -572,7 +584,9 @@ class ScanTask:
                 # ANALISIS SOLO DE AP (modo original)
                 logger.info(f"[{self.scan_id}] Ejecutando analisis solo de AP...")
 
-                freq_analyzer = FrequencyAnalyzer()
+                freq_analyzer = FrequencyAnalyzer(
+                    config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+                )
 
                 for i, ip in enumerate(completed_aps):
                     logger.info(f"[{self.scan_id}] Analizando AP {ip}...")
@@ -813,10 +827,10 @@ class ScanTask:
                 log_callback=self.log,
             )
         except Exception as exc:
-            self.log(
-                f"[AUTO-APPLY] No se pudo instanciar TowerScanner: {exc}", "error"
+            self.log(f"[AUTO-APPLY] No se pudo instanciar TowerScanner: {exc}", "error")
+            logger.error(
+                "[%s] auto-apply: TowerScanner init failed: %s", self.scan_id, exc
             )
-            logger.error("[%s] auto-apply: TowerScanner init failed: %s", self.scan_id, exc)
             return
 
         apply_manager = FrequencyApplyManager(
@@ -869,7 +883,10 @@ class ScanTask:
                     )
                     logger.info(
                         "[%s] auto-apply: AP %s → %s MHz OK (apply_id=%s)",
-                        self.scan_id, ap_ip, freq_mhz, apply_id,
+                        self.scan_id,
+                        ap_ip,
+                        freq_mhz,
+                        apply_id,
                     )
                 else:
                     errors = "; ".join(result.get("errors") or [])
@@ -880,7 +897,10 @@ class ScanTask:
                     )
                     logger.warning(
                         "[%s] auto-apply: AP %s failed (apply_id=%s): %s",
-                        self.scan_id, ap_ip, apply_id, errors,
+                        self.scan_id,
+                        ap_ip,
+                        apply_id,
+                        errors,
                     )
 
             except Exception as exc:
@@ -890,6 +910,8 @@ class ScanTask:
                 )
                 logger.error(
                     "[%s] auto-apply: AP %s unexpected error: %s",
-                    self.scan_id, ap_ip, exc,
+                    self.scan_id,
+                    ap_ip,
+                    exc,
                     exc_info=True,
                 )
