@@ -652,8 +652,13 @@ class TestMakeBeforeBreak:
         assert 3650000 in merged, "Current freq must be in merged list"
         assert 3652500 in merged, "New freq must be in merged list"
 
-    def test_get_failure_falls_back_to_new_only(self, manager, db, scanner):
-        """GIVEN GET rfScanList fails THEN set_sm_scan_list receives only the new frequency."""
+    def test_get_failure_skips_sm_mutation(self, manager, db, scanner):
+        """GIVEN GET rfScanList fails THEN set_sm_scan_list is NOT called for that SM.
+
+        Rollback safety: writing new-only would destroy the SM's existing scan list.
+        When we can't read the current list, the safe choice is to leave the SM as-is.
+        The SM keeps its current config; only the AP frequency changes.
+        """
         scanner.get_sm_scan_list.return_value = (False, [], "Timeout")
 
         _insert_scan(
@@ -667,11 +672,10 @@ class TestMakeBeforeBreak:
         )
         result = manager.run_apply("MBB4", 3652.5, "TORRE-01", "admin", force=False)
 
-        # Apply must still succeed (GET failure is non-fatal)
-        assert result["state"] == "completed"
-        args, _ = scanner.set_sm_scan_list.call_args
-        merged = args[1]
-        assert merged == [3652500], f"Expected [3652500] on GET failure, got {merged}"
+        # The SM's rfScanList must NOT have been touched (rollback safety)
+        scanner.set_sm_scan_list.assert_not_called()
+        # The skipped SM is reflected in results with skipped_preservation flag
+        assert result["sm_results"]["192.168.1.20"].get("skipped_preservation") is True
 
     def test_deduplication_when_new_freq_already_in_current(self, manager, db, scanner):
         """GIVEN current=[3652500] and new=3652500 THEN merged list has no duplicate."""
@@ -714,8 +718,16 @@ class TestMakeBeforeBreak:
         assert 15 in merged_bws, "Current bw (15) must be in merged list"
         assert 20 in merged_bws, "New bw (20) must be in merged list"
 
-    def test_bw_get_failure_falls_back_to_new_only(self, manager, db, scanner):
-        """GIVEN GET bandwidthScan fails THEN set_sm_bandwidth_scan receives only [new_bw]."""
+    def test_bw_get_failure_skips_sm_bw_mutation(self, manager, db, scanner):
+        """GIVEN GET bandwidthScan fails THEN set_sm_bandwidth_scan is NOT called for that SM.
+
+        Rollback safety: writing new-only bandwidth would destroy the SM's existing
+        bandwidth scan list. When we can't read the current list, we skip the SET.
+        The rfScanList SET still proceeds (its GET succeeded).
+        """
+        # rfScanList GET succeeds (so rfScanList SET will proceed)
+        scanner.get_sm_scan_list.return_value = (True, [], "OK")
+        # bandwidthScan GET fails → must skip bandwidthScan SET
         scanner.get_sm_bandwidth_scan.return_value = (False, [], "Timeout")
 
         _insert_scan(
@@ -731,9 +743,15 @@ class TestMakeBeforeBreak:
             "MBB7", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
         )
 
-        assert result["state"] == "completed"
-        args, _ = scanner.set_sm_bandwidth_scan.call_args
-        assert args[1] == [20], f"Expected [20] on GET failure, got {args[1]}"
+        # bandwidthScan must NOT have been touched (rollback safety)
+        scanner.set_sm_bandwidth_scan.assert_not_called()
+        # rfScanList SET should still have been called (its GET succeeded)
+        scanner.set_sm_scan_list.assert_called_once()
+        # The apply state reflects the bw_scan was skipped
+        assert (
+            result["sm_results"]["192.168.1.20"]["bw_scan"].get("skipped_preservation")
+            is True
+        )
 
     def test_full_flow_get_merge_set(self, manager, db, scanner):
         """GIVEN full make-before-break flow THEN state is 'completed' with merged values sent."""
@@ -765,3 +783,51 @@ class TestMakeBeforeBreak:
         bw_args, _ = scanner.set_sm_bandwidth_scan.call_args
         assert 15 in bw_args[1]
         assert 20 in bw_args[1]
+
+    def test_get_failure_logs_preservation_warning(self, manager, db, scanner, caplog):
+        """GIVEN GET rfScanList fails THEN a warning about skipping is logged."""
+        import logging
+
+        scanner.get_sm_scan_list.return_value = (False, [], "No SNMP response")
+
+        _insert_scan(
+            db,
+            "MBB9",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        with caplog.at_level(logging.WARNING, logger="app.freq_apply_manager"):
+            manager.run_apply("MBB9", 3652.5, "TORRE-01", "admin", force=False)
+
+        # Must log a warning that mentions skipping and rollback safety
+        warning_msgs = [
+            r.message for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        assert any(
+            "skipping rfScanList mutation" in m and "rollback safety" in m
+            for m in warning_msgs
+        ), f"Expected preservation warning in logs, got: {warning_msgs}"
+
+    def test_get_failure_does_not_prevent_ap_apply(self, manager, db, scanner):
+        """GIVEN GET rfScanList fails for SM THEN the AP frequency change still happens."""
+        scanner.get_sm_scan_list.return_value = (False, [], "Timeout")
+
+        _insert_scan(
+            db,
+            "MBB10",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("MBB10", 3652.5, "TORRE-01", "admin", force=False)
+
+        # AP SET must still have been called with the target frequency
+        scanner.set_frequency.assert_called_once_with("192.168.1.10", 3652500)
+        # Apply succeeds (AP succeeded; SM was skipped, not failed)
+        assert result["state"] == "completed"
+        assert result["ap_result"]["success"] is True

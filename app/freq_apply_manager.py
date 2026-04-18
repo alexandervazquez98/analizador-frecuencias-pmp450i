@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
 # Minimum combined_score required for auto-apply and un-forced manual apply.
 _VIABILITY_SCORE_THRESHOLD = 0.65
 
+# Maximum number of entries kept in the SM rfScanList after merging (firmware limit).
+SM_SCAN_LIST_MAX_ENTRIES = 8
+
 
 class FrequencyApplyManager:
     """Orchestrates the SM-first → AP-last frequency apply sequence.
@@ -216,6 +219,7 @@ class FrequencyApplyManager:
         # Si falla rfScanList → SM se marca como fallido.
         sm_results: Dict[str, Dict] = {}
         sm_failures: List[str] = []
+        sm_skipped: List[str] = []
 
         if sm_ips:
             for sm_ip in sm_ips:
@@ -226,19 +230,29 @@ class FrequencyApplyManager:
                 # merge (not replace) — if AP rolls back, SM can still find it.
 
                 # 2a. GET current rfScanList (best-effort, non-fatal on failure)
+                # If GET fails we SKIP the SET entirely — writing new-only would destroy
+                # the SM's existing scan list and that is exactly what make-before-break
+                # was designed to prevent (rollback safety).
                 get_ok, current_freqs, get_msg = self._scanner.get_sm_scan_list(sm_ip)
                 if not get_ok:
                     logger.warning(
-                        "[APPLY %d] SM %s: GET rfScanList failed (non-fatal) — %s. "
-                        "Falling back to new-only.",
+                        "[APPLY %d] SM %s: skipping rfScanList mutation — could not read "
+                        "current config (rollback safety): %s",
                         apply_id,
                         sm_ip,
                         get_msg,
                     )
-                    current_freqs = []
+                    sm_entry["skipped_preservation"] = True
+                    sm_results[sm_ip] = sm_entry
+                    sm_skipped.append(sm_ip)
+                    errors.append(
+                        f"SM {sm_ip}: skipped — could not read current scan list for preservation"
+                    )
+                    continue  # Skip this SM entirely — AP will still be changed below
 
-                # Merge: deduplicated union of current + new frequency
+                # Merge: deduplicated union of current + new frequency, capped to max entries
                 merged_freqs = list(dict.fromkeys(current_freqs + [freq_khz]))
+                merged_freqs = merged_freqs[-SM_SCAN_LIST_MAX_ENTRIES:]
                 logger.info(
                     "[APPLY] SM %s: merging rfScanList: current=%s + new=%s → merged=%s",
                     sm_ip,
@@ -248,66 +262,82 @@ class FrequencyApplyManager:
                 )
 
                 # 2b. GET current bandwidthScan (best-effort, non-fatal on failure)
+                # If GET fails, skip SET for bandwidthScan too (same rollback-safety logic).
                 if channel_width:
                     bw_get_ok, current_bws, bw_get_msg = (
                         self._scanner.get_sm_bandwidth_scan(sm_ip)
                     )
                     if not bw_get_ok:
                         logger.warning(
-                            "[APPLY %d] SM %s: GET bandwidthScan failed (non-fatal) — %s. "
-                            "Falling back to new-only.",
+                            "[APPLY %d] SM %s: skipping bandwidthScan mutation — could not "
+                            "read current config (rollback safety): %s",
                             apply_id,
                             sm_ip,
                             bw_get_msg,
                         )
-                        current_bws = []
+                        sm_entry["bw_scan"] = {"skipped_preservation": True}
+                    else:
+                        new_bw_str = f"{float(channel_width):.1f} MHz"
 
-                    new_bw_str = f"{float(channel_width):.1f} MHz"
-                    # Merge: deduplicated union of current + new bandwidth strings
-                    merged_bws_str = list(dict.fromkeys(current_bws + [new_bw_str]))
-                    logger.info(
-                        "[APPLY] SM %s: merging bandwidthScan: current=%s + new=%s → merged=%s",
-                        sm_ip,
-                        current_bws,
-                        [new_bw_str],
-                        merged_bws_str,
-                    )
+                        # Normalize current_bws to canonical "X.0 MHz" form before
+                        # deduplication — firmware may return "20 MHz" (no decimal)
+                        # while new_bw_str is "20.0 MHz", causing silent duplicates.
+                        def _normalize_bw(s: str) -> str:
+                            try:
+                                return f"{float(s.replace('MHz', '').strip()):.1f} MHz"
+                            except (ValueError, AttributeError):
+                                return s
 
-                    # Convert merged bandwidth strings back to int list for the setter
-                    # e.g. ["15.0 MHz", "20.0 MHz"] → [15, 20]
-                    merged_bws_int = []
-                    for bw_s in merged_bws_str:
-                        try:
-                            merged_bws_int.append(
-                                int(float(bw_s.replace("MHz", "").strip()))
-                            )
-                        except ValueError:
-                            pass  # Skip malformed values
-
-                    # 2c. SET bandwidthScan with merged list
-                    bw_ok, bw_msg = self._scanner.set_sm_bandwidth_scan(
-                        sm_ip, merged_bws_int
-                    )
-                    sm_entry["bw_scan"] = {
-                        "success": bw_ok,
-                        "error": bw_msg if not bw_ok else None,
-                    }
-                    if bw_ok:
+                        normalized_current = [_normalize_bw(b) for b in current_bws]
+                        normalized_new = _normalize_bw(new_bw_str)
+                        # Merge: deduplicated union of current + new bandwidth strings, capped
+                        merged_bws_str = list(
+                            dict.fromkeys(normalized_current + [normalized_new])
+                        )
+                        merged_bws_str = merged_bws_str[-SM_SCAN_LIST_MAX_ENTRIES:]
                         logger.info(
-                            "[APPLY %d] SM %s: bandwidthScan=%s OK",
-                            apply_id,
+                            "[APPLY] SM %s: merging bandwidthScan: current=%s + new=%s → merged=%s",
                             sm_ip,
+                            current_bws,
+                            [new_bw_str],
                             merged_bws_str,
                         )
-                    else:
-                        # Non-fatal: SM puede seguir con rfScanList
-                        errors.append(f"SM {sm_ip} bandwidthScan: {bw_msg}")
-                        logger.warning(
-                            "[APPLY %d] SM %s bandwidthScan failed (non-fatal): %s",
-                            apply_id,
-                            sm_ip,
-                            bw_msg,
+
+                        # Convert merged bandwidth strings back to int list for the setter
+                        # e.g. ["15.0 MHz", "20.0 MHz"] → [15, 20]
+                        merged_bws_int = []
+                        for bw_s in merged_bws_str:
+                            try:
+                                merged_bws_int.append(
+                                    int(float(bw_s.replace("MHz", "").strip()))
+                                )
+                            except ValueError:
+                                pass  # Skip malformed values
+
+                        # 2c. SET bandwidthScan with merged list
+                        bw_ok, bw_msg = self._scanner.set_sm_bandwidth_scan(
+                            sm_ip, merged_bws_int
                         )
+                        sm_entry["bw_scan"] = {
+                            "success": bw_ok,
+                            "error": bw_msg if not bw_ok else None,
+                        }
+                        if bw_ok:
+                            logger.info(
+                                "[APPLY %d] SM %s: bandwidthScan=%s OK",
+                                apply_id,
+                                sm_ip,
+                                merged_bws_str,
+                            )
+                        else:
+                            # Non-fatal: SM puede seguir con rfScanList
+                            errors.append(f"SM {sm_ip} bandwidthScan: {bw_msg}")
+                            logger.warning(
+                                "[APPLY %d] SM %s bandwidthScan failed (non-fatal): %s",
+                                apply_id,
+                                sm_ip,
+                                bw_msg,
+                            )
 
                 # 2d. SET rfScanList with merged list (frecuencia — siempre)
                 success, msg = self._scanner.set_sm_scan_list(sm_ip, merged_freqs)
@@ -446,6 +476,7 @@ class FrequencyApplyManager:
             final_state=final_state,
             sm_count=len(sm_ips),
             failed_sm_count=len(sm_failures),
+            skipped_sm_count=len(sm_skipped),
             ap_success=ap_success,
             errors=errors,
         )
@@ -530,6 +561,7 @@ class FrequencyApplyManager:
         final_state: str,
         sm_count: int,
         failed_sm_count: int,
+        skipped_sm_count: int,
         ap_success: bool,
         errors: List[str],
     ) -> None:
@@ -542,7 +574,7 @@ class FrequencyApplyManager:
             )
             result_summary = (
                 f"apply_id={apply_id} state={final_state} "
-                f"freq={freq_khz}kHz sm={sm_count}(failed={failed_sm_count}) "
+                f"freq={freq_khz}kHz sm={sm_count}(failed={failed_sm_count},skipped={skipped_sm_count}) "
                 f"ap={'OK' if ap_success else 'FAILED'}"
             )
             audit.log_action(
@@ -555,6 +587,7 @@ class FrequencyApplyManager:
                     "state": final_state,
                     "sm_count": sm_count,
                     "failed_sm_count": failed_sm_count,
+                    "skipped_sm_count": skipped_sm_count,
                     "ap_success": ap_success,
                     "errors": errors,
                 },
