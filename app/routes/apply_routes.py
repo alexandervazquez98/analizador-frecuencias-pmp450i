@@ -41,6 +41,7 @@ apply_bp = Blueprint("apply", __name__)
 
 # ── RBAC helper ──────────────────────────────────────────────────────────────
 
+
 def _require_operator_or_admin():
     """Return a 403 JSON response if the current session role is 'viewer'.
 
@@ -54,6 +55,7 @@ def _require_operator_or_admin():
 
 
 # ── Manager factory ──────────────────────────────────────────────────────────
+
 
 def _get_freq_apply_manager() -> FrequencyApplyManager:
     """Instantiate FrequencyApplyManager from app.config managers.
@@ -92,7 +94,7 @@ def apply_frequency():
         scan_id (str, required)         — completed scan to use as source
         freq_mhz (float, required)      — target frequency in MHz
         tower_id (str, required)        — tower identifier
-        channel_width_mhz (float, opt) — channel width in MHz (stored, SET deferred)
+        channel_width_mhz (float, opt) — channel width in MHz (SET on SMs + AP)
         force (bool, opt, default false)— bypass viability check (admin only)
 
     Returns:
@@ -180,4 +182,6 @@ def get_apply_history(tower_id: str):
 
     except Exception as exc:
         logger.exception("[get_apply_history] tower_id=%s error: %s", tower_id, exc)
-        return jsonify({"error": "Failed to retrieve apply history", "detail": str(exc)}), 500
+        return jsonify(
+            {"error": "Failed to retrieve apply history", "detail": str(exc)}
+        ), 500
