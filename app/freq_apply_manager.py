@@ -73,7 +73,7 @@ class FrequencyApplyManager:
         freq_mhz: float,
         tower_id: str,
         applied_by: str,
-        channel_width_mhz: float = None,
+        channel_width_mhz: Optional[float] = None,
         force: bool = False,
     ) -> Dict:
         """Validate viability and execute the apply sequence.
@@ -118,9 +118,7 @@ class FrequencyApplyManager:
                 is_viable = best_combined.get("is_viable", False)
                 combined_score = best_combined.get("combined_score", 0.0)
                 if not is_viable:
-                    raise ValueError(
-                        "Analysis not viable. Use force=true to override."
-                    )
+                    raise ValueError("Analysis not viable. Use force=true to override.")
                 if combined_score < _VIABILITY_SCORE_THRESHOLD:
                     raise ValueError(
                         f"combined_score {combined_score:.2f} is below threshold "
@@ -128,7 +126,9 @@ class FrequencyApplyManager:
                     )
             elif best_ap:
                 # AP_ONLY path — 'Válido'='Sí' is the viability signal
-                is_viable_ap = best_ap.get("Válido") == "Sí" or best_ap.get("is_optimal", False)
+                is_viable_ap = best_ap.get("Válido") == "Sí" or best_ap.get(
+                    "is_optimal", False
+                )
                 if not is_viable_ap:
                     raise ValueError(
                         "Analysis not viable (AP_ONLY). Use force=true to override."
@@ -198,17 +198,62 @@ class FrequencyApplyManager:
         )
         logger.info(
             "[APPLY %d] Created: tower=%s scan=%s freq=%d kHz applied_by=%s",
-            apply_id, tower_id, scan_id, freq_khz, applied_by,
+            apply_id,
+            tower_id,
+            scan_id,
+            freq_khz,
+            applied_by,
         )
 
-        # ── Step 2: SET rfScanList on all SMs (SM-first) ─────────────────
+        # ── Step 2: SET rfScanList + bandwidthScan on all SMs (SM-first) ──
+        #
+        # Secuencia por SM:
+        #   a) bandwidthScan.0 — ancho de canal permitido para re-registro
+        #   b) rfScanList      — frecuencias a escanear
+        #
+        # bandwidthScan se envía SIEMPRE que channel_width esté disponible.
+        # Si falla bandwidthScan pero rfScanList OK → warning, no fatal.
+        # Si falla rfScanList → SM se marca como fallido.
         sm_results: Dict[str, Dict] = {}
         sm_failures: List[str] = []
 
         if sm_ips:
             for sm_ip in sm_ips:
+                sm_entry: Dict = {}
+
+                # 2a. SET bandwidthScan (si channel_width disponible)
+                if channel_width:
+                    bw_ok, bw_msg = self._scanner.set_sm_bandwidth_scan(
+                        sm_ip, channel_width
+                    )
+                    sm_entry["bw_scan"] = {
+                        "success": bw_ok,
+                        "error": bw_msg if not bw_ok else None,
+                    }
+                    if bw_ok:
+                        logger.info(
+                            "[APPLY %d] SM %s: bandwidthScan=%d MHz OK",
+                            apply_id,
+                            sm_ip,
+                            channel_width,
+                        )
+                    else:
+                        # Non-fatal: SM puede seguir con rfScanList
+                        errors.append(f"SM {sm_ip} bandwidthScan: {bw_msg}")
+                        logger.warning(
+                            "[APPLY %d] SM %s bandwidthScan failed (non-fatal): %s",
+                            apply_id,
+                            sm_ip,
+                            bw_msg,
+                        )
+
+                # 2b. SET rfScanList (frecuencia — siempre)
                 success, msg = self._scanner.set_sm_scan_list(sm_ip, [freq_khz])
-                sm_results[sm_ip] = {"success": success, "error": msg if not success else None}
+                sm_entry["success"] = success
+                sm_entry["error"] = msg if not success else None
+
+                sm_results[sm_ip] = sm_entry
+
                 if not success:
                     sm_failures.append(sm_ip)
                     errors.append(f"SM {sm_ip}: {msg}")
@@ -234,7 +279,9 @@ class FrequencyApplyManager:
         ap_result_json = json.dumps(ap_result)
 
         if ap_success:
-            logger.info("[APPLY %d] AP %s: rfFreqCarrier=%d kHz OK", apply_id, ap_ip, freq_khz)
+            logger.info(
+                "[APPLY %d] AP %s: rfFreqCarrier=%d kHz OK", apply_id, ap_ip, freq_khz
+            )
         else:
             errors.append(f"AP {ap_ip}: {ap_msg}")
             logger.error("[APPLY %d] AP %s failed: %s", apply_id, ap_ip, ap_msg)
@@ -247,13 +294,25 @@ class FrequencyApplyManager:
             bw_success, bw_msg = self._scanner.set_channel_width(
                 ap_ip, channel_width, ap_freq_mhz=ap_freq_mhz
             )
-            channel_width_result = {"success": bw_success, "error": bw_msg if not bw_success else None}
+            channel_width_result = {
+                "success": bw_success,
+                "error": bw_msg if not bw_success else None,
+            }
             if bw_success:
-                logger.info("[APPLY %d] AP %s: channelBandwidth=%d MHz OK", apply_id, ap_ip, channel_width)
+                logger.info(
+                    "[APPLY %d] AP %s: channelBandwidth=%d MHz OK",
+                    apply_id,
+                    ap_ip,
+                    channel_width,
+                )
             else:
                 # NO falla el apply — solo warning
                 errors.append(f"channel_width {ap_ip}: {bw_msg}")
-                logger.warning("[APPLY %d] channelBandwidth SET falló (non-fatal): %s", apply_id, bw_msg)
+                logger.warning(
+                    "[APPLY %d] channelBandwidth SET falló (non-fatal): %s",
+                    apply_id,
+                    bw_msg,
+                )
 
         # ── Step 4c: SET contention_slots = 4 (OBLIGATORIO, non-fatal) ────
         ct_success, ct_msg = self._scanner.set_contention_slots(ap_ip)
@@ -261,7 +320,11 @@ class FrequencyApplyManager:
             logger.info("[APPLY %d] AP %s: contention_slots=4 OK", apply_id, ap_ip)
         else:
             errors.append(f"contention_slots {ap_ip}: {ct_msg}")
-            logger.warning("[APPLY %d] contention_slots SET falló (non-fatal): %s", apply_id, ct_msg)
+            logger.warning(
+                "[APPLY %d] contention_slots SET falló (non-fatal): %s",
+                apply_id,
+                ct_msg,
+            )
 
         # ── Step 4d: SET broadcast_retry = 0 (OBLIGATORIO, non-fatal) ─────
         br_success, br_msg = self._scanner.set_broadcast_retry(ap_ip)
@@ -269,17 +332,25 @@ class FrequencyApplyManager:
             logger.info("[APPLY %d] AP %s: broadcastRetryCount=0 OK", apply_id, ap_ip)
         else:
             errors.append(f"broadcast_retry {ap_ip}: {br_msg}")
-            logger.warning("[APPLY %d] broadcast_retry SET falló (non-fatal): %s", apply_id, br_msg)
+            logger.warning(
+                "[APPLY %d] broadcast_retry SET falló (non-fatal): %s", apply_id, br_msg
+            )
 
         # ── Step 4e: rebootIfRequired = 1 (SIEMPRE, último paso) ──────────
         # El equipo evaluará si los cambios requieren reinicio y lo ejecutará
         # automáticamente. El AP quedará inaccesible ~30-60 s (esperado).
         rb_success, rb_msg = self._scanner.reboot_if_required(ap_ip)
         if rb_success:
-            logger.info("[APPLY %d] AP %s: rebootIfRequired=1 enviado OK", apply_id, ap_ip)
+            logger.info(
+                "[APPLY %d] AP %s: rebootIfRequired=1 enviado OK", apply_id, ap_ip
+            )
         else:
             errors.append(f"reboot {ap_ip}: {rb_msg}")
-            logger.warning("[APPLY %d] reboot_if_required SET falló (non-fatal): %s", apply_id, rb_msg)
+            logger.warning(
+                "[APPLY %d] reboot_if_required SET falló (non-fatal): %s",
+                apply_id,
+                rb_msg,
+            )
 
         # ── Step 5: Determine final state ─────────────────────────────────
         # State machine rules (from spec Domain 8):

@@ -850,6 +850,7 @@ class ScanTask:
             is_viable = best.get("is_viable", False)
             combined_score = best.get("combined_score", 0.0)
             freq_mhz = best.get("frequency")
+            bw_mhz = best.get("bandwidth")
 
             if not is_viable or combined_score < 0.65 or not freq_mhz:
                 self.log(
@@ -872,6 +873,7 @@ class ScanTask:
                     tower_id=tower_id or ap_ip,  # fallback: use AP IP as tower_id
                     applied_by="auto",
                     force=False,  # auto-apply never bypasses viability gate
+                    channel_width_mhz=float(bw_mhz) if bw_mhz else None,
                 )
                 state = result.get("state", "unknown")
                 apply_id = result.get("apply_id")

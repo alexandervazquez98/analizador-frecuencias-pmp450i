@@ -57,6 +57,9 @@ class TowerScanner:
     RF_SCAN_LIST_OID = (
         "1.3.6.1.4.1.161.19.3.2.1.1.0"  # SM — OctetString, kHz separado por coma
     )
+    SM_BW_SCAN_OID = (
+        "1.3.6.1.4.1.161.19.3.2.1.131.0"  # SM — bandwidthScan.0, OctetString
+    )
 
     # Valores de control
     SET_FULL_SCAN = 8
@@ -932,6 +935,49 @@ class TowerScanner:
             self._log(f"[APPLY] {ip}: SET rfScanList OK — '{scan_list_str}'", "info")
         else:
             self._log(f"[APPLY] {ip}: FALLÓ set_sm_scan_list — {msg}", "error")
+
+        return success, msg
+
+    def set_sm_bandwidth_scan(self, ip: str, width_mhz: int) -> Tuple[bool, str]:
+        """SET bandwidthScan.0 on SM via SNMP — configures allowed channel widths.
+
+        OID: .1.3.6.1.4.1.161.19.3.2.1.131.0 (bandwidthScan.0, OctetString)
+        Value format: "20.0 MHz" (text string matching the target bandwidth).
+
+        MUST be called BEFORE changing AP bandwidth so the SM knows which
+        channel widths to scan for when re-registering after reboot.
+
+        Args:
+            ip:        SM IP address.
+            width_mhz: Channel bandwidth in MHz (5, 7, 10, 15, 20, 30, 40).
+
+        Returns:
+            Tuple (success: bool, message: str).
+        """
+        VALID_BWS = [5, 7, 10, 15, 20, 30, 40]
+        width_mhz = int(width_mhz)
+        if width_mhz not in VALID_BWS:
+            return False, (
+                f"Ancho de canal {width_mhz} MHz no soportado para SM. "
+                f"Válidos: {VALID_BWS}"
+            )
+
+        bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz"
+        self._log(
+            f"[APPLY] {ip}: SET bandwidthScan = '{bw_str}' (OID {self.SM_BW_SCAN_OID})",
+            "info",
+        )
+
+        success, msg = self._snmp_set_string(
+            ip=ip,
+            oid=self.SM_BW_SCAN_OID,
+            value=bw_str,
+        )
+
+        if success:
+            self._log(f"[APPLY] {ip}: SET bandwidthScan='{bw_str}' OK", "info")
+        else:
+            self._log(f"[APPLY] {ip}: FALLÓ set_sm_bandwidth_scan — {msg}", "error")
 
         return success, msg
 
