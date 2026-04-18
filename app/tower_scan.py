@@ -17,7 +17,7 @@ import logging
 # que pysnmp puede retornar cuando str() se aplica sobre IpAddress objects.
 _IPV4_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
-from app.freq_utils import format_scan_list
+from app.freq_utils import format_scan_list, parse_scan_list
 
 
 @dataclass
@@ -938,31 +938,45 @@ class TowerScanner:
 
         return success, msg
 
-    def set_sm_bandwidth_scan(self, ip: str, width_mhz: int) -> Tuple[bool, str]:
+    def set_sm_bandwidth_scan(
+        self, ip: str, width_mhz: "int | List[int]"
+    ) -> Tuple[bool, str]:
         """SET bandwidthScan.0 on SM via SNMP — configures allowed channel widths.
 
         OID: .1.3.6.1.4.1.161.19.3.2.1.131.0 (bandwidthScan.0, OctetString)
-        Value format: "20.0 MHz" (text string matching the target bandwidth).
+        Value format: "20.0 MHz" or "15.0 MHz, 20.0 MHz" (comma-separated).
 
         MUST be called BEFORE changing AP bandwidth so the SM knows which
         channel widths to scan for when re-registering after reboot.
 
+        Make-before-break: pass a LIST of bandwidths (current + new) so that the
+        SM can still re-register on the OLD bandwidth if the AP rolls back.
+
         Args:
             ip:        SM IP address.
-            width_mhz: Channel bandwidth in MHz (5, 7, 10, 15, 20, 30, 40).
+            width_mhz: Single bandwidth int (e.g. 20) OR list of ints (e.g. [15, 20]).
+                       Valid values: 5, 7, 10, 15, 20, 30, 40.
 
         Returns:
             Tuple (success: bool, message: str).
         """
         VALID_BWS = [5, 7, 10, 15, 20, 30, 40]
-        width_mhz = int(width_mhz)
-        if width_mhz not in VALID_BWS:
-            return False, (
-                f"Ancho de canal {width_mhz} MHz no soportado para SM. "
-                f"Válidos: {VALID_BWS}"
-            )
 
-        bw_str = f"{float(width_mhz):.1f} MHz"  # → "20.0 MHz"
+        # Normalise to list for uniform handling — backward compat with single int
+        if isinstance(width_mhz, list):
+            widths = [int(w) for w in width_mhz]
+        else:
+            widths = [int(width_mhz)]
+
+        for w in widths:
+            if w not in VALID_BWS:
+                return False, (
+                    f"Ancho de canal {w} MHz no soportado para SM. Válidos: {VALID_BWS}"
+                )
+
+        bw_str = ", ".join(
+            f"{float(w):.1f} MHz" for w in widths
+        )  # → "20.0 MHz" or "15.0 MHz, 20.0 MHz"
         self._log(
             f"[APPLY] {ip}: SET bandwidthScan = '{bw_str}' (OID {self.SM_BW_SCAN_OID})",
             "info",
@@ -980,6 +994,75 @@ class TowerScanner:
             self._log(f"[APPLY] {ip}: FALLÓ set_sm_bandwidth_scan — {msg}", "error")
 
         return success, msg
+
+    def get_sm_scan_list(self, ip: str) -> Tuple[bool, List[int], str]:
+        """GET current rfScanList.0 from SM via SNMP.
+
+        OID: .1.3.6.1.4.1.161.19.3.2.1.1.0 (RF_SCAN_LIST_OID, OctetString)
+        Response format: "3650000, 3660000" (frequencies in kHz, comma-separated).
+
+        Used by make-before-break strategy: read current scan list before merging
+        with the new frequency so that SM can still find the AP if it rolls back.
+
+        Args:
+            ip: SM IP address.
+
+        Returns:
+            Tuple (success: bool, freqs_khz: List[int], message: str).
+            On failure returns (False, [], error_message).
+        """
+        ok, raw, msg = self._snmp_get_oid(ip, self.RF_SCAN_LIST_OID)
+        if not ok:
+            self._log(
+                f"[APPLY] {ip}: GET rfScanList FAILED — {msg}",
+                "warning",
+            )
+            return False, [], msg
+
+        freqs = parse_scan_list(raw)
+        self._log(
+            f"[APPLY] {ip}: GET rfScanList = '{raw}' → {freqs}",
+            "info",
+        )
+        return True, freqs, "OK"
+
+    def get_sm_bandwidth_scan(self, ip: str) -> Tuple[bool, List[str], str]:
+        """GET current bandwidthScan.0 from SM via SNMP.
+
+        OID: .1.3.6.1.4.1.161.19.3.2.1.131.0 (SM_BW_SCAN_OID, OctetString)
+        Response format: "5.0 MHz, 20.0 MHz" (bandwidth strings, comma-separated).
+
+        Used by make-before-break strategy: read current bandwidth scan list before
+        merging with the new bandwidth so that SM can still re-register if AP rolls back.
+
+        Args:
+            ip: SM IP address.
+
+        Returns:
+            Tuple (success: bool, bws: List[str], message: str).
+            On failure returns (False, [], error_message).
+        """
+        ok, raw, msg = self._snmp_get_oid(ip, self.SM_BW_SCAN_OID)
+        if not ok:
+            self._log(
+                f"[APPLY] {ip}: GET bandwidthScan FAILED — {msg}",
+                "warning",
+            )
+            return False, [], msg
+
+        if not raw or not raw.strip():
+            self._log(
+                f"[APPLY] {ip}: GET bandwidthScan = '' (empty)",
+                "info",
+            )
+            return True, [], "OK"
+
+        bws = [part.strip() for part in raw.split(",") if part.strip()]
+        self._log(
+            f"[APPLY] {ip}: GET bandwidthScan = '{raw}' → {bws}",
+            "info",
+        )
+        return True, bws, "OK"
 
     def set_channel_width(
         self, ip: str, width_mhz: int, ap_freq_mhz: float = None
