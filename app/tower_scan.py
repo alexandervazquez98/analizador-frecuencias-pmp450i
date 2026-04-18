@@ -753,16 +753,14 @@ class TowerScanner:
         return results
 
     def _snmp_get_oid_raw(
-        self, ip: str, oid: str, community: str
+        self, ip: str, oid: str, community: str, timeout: int = 5, retries: int = 2
     ) -> Tuple[bool, str, str]:
         """Helper para probar una comunidad específica"""
         try:
             iterator = getCmd(
                 SnmpEngine(),
                 CommunityData(community, mpModel=1),
-                UdpTransportTarget(
-                    (ip, 161), timeout=5, retries=2
-                ),  # Timeout aumentado a 5s, 2 retries
+                UdpTransportTarget((ip, 161), timeout=timeout, retries=retries),
                 ContextData(),
                 ObjectType(ObjectIdentity(oid)),
             )
@@ -781,7 +779,9 @@ class TowerScanner:
     ) -> Tuple[bool, str, str]:
         """Helper genérico para GET OID usando la comunidad mapeada"""
         community = self._get_community(ip)
-        return self._snmp_get_oid_raw(ip, oid, community)
+        return self._snmp_get_oid_raw(
+            ip, oid, community, timeout=timeout, retries=retries
+        )
 
     # =========================================================================
     # MÉTODOS DE APPLY DE FRECUENCIA (change-006)
@@ -929,6 +929,8 @@ class TowerScanner:
             ip=ip,
             oid=self.RF_SCAN_LIST_OID,
             value=scan_list_str,
+            timeout=self.SM_SNMP_TIMEOUT,
+            retries=self.SM_SNMP_RETRIES,
         )
 
         if success:
@@ -986,6 +988,8 @@ class TowerScanner:
             ip=ip,
             oid=self.SM_BW_SCAN_OID,
             value=bw_str,
+            timeout=self.SM_SNMP_TIMEOUT,
+            retries=self.SM_SNMP_RETRIES,
         )
 
         if success:
@@ -994,6 +998,41 @@ class TowerScanner:
             self._log(f"[APPLY] {ip}: FALLÓ set_sm_bandwidth_scan — {msg}", "error")
 
         return success, msg
+
+    def _snmp_get_oid_sm(self, ip: str, oid: str) -> Tuple[bool, str, str]:
+        """GET an OctetString OID from a SM, trying ALL communities until one succeeds.
+
+        Unlike _snmp_get_oid() (which uses a single mapped community), this helper
+        iterates self.snmp_communities so it works even when device_community_map is
+        empty — e.g. when FrequencyApplyManager creates a scanner without running
+        the full discovery/validation flow first (Issue #2).
+
+        Uses SM_SNMP_TIMEOUT and SM_SNMP_RETRIES (Issue #3) — SMs have higher
+        latency than APs so the AP-level 2-second timeout is insufficient.
+
+        Args:
+            ip:  SM IP address.
+            oid: OID to GET (OctetString expected).
+
+        Returns:
+            Tuple (success: bool, raw_value: str, message: str).
+            On all-communities failure returns (False, '', "all communities failed").
+        """
+        last_msg = "no communities configured"
+        for community in self.snmp_communities:
+            ok, raw, msg = self._snmp_get_oid_raw(
+                ip,
+                oid,
+                community,
+                timeout=self.SM_SNMP_TIMEOUT,
+                retries=self.SM_SNMP_RETRIES,
+            )
+            if ok:
+                return True, raw, "OK"
+            last_msg = msg
+
+        # All communities exhausted
+        return False, "", f"all communities failed: {last_msg}"
 
     def get_sm_scan_list(self, ip: str) -> Tuple[bool, List[int], str]:
         """GET current rfScanList.0 from SM via SNMP.
@@ -1004,6 +1043,10 @@ class TowerScanner:
         Used by make-before-break strategy: read current scan list before merging
         with the new frequency so that SM can still find the AP if it rolls back.
 
+        Tries ALL configured SNMP communities (not just the mapped one) so it works
+        correctly even when device_community_map is empty (Issue #2).
+        Uses SM_SNMP_TIMEOUT / SM_SNMP_RETRIES for higher-latency SM links (Issue #3).
+
         Args:
             ip: SM IP address.
 
@@ -1011,7 +1054,7 @@ class TowerScanner:
             Tuple (success: bool, freqs_khz: List[int], message: str).
             On failure returns (False, [], error_message).
         """
-        ok, raw, msg = self._snmp_get_oid(ip, self.RF_SCAN_LIST_OID)
+        ok, raw, msg = self._snmp_get_oid_sm(ip, self.RF_SCAN_LIST_OID)
         if not ok:
             self._log(
                 f"[APPLY] {ip}: GET rfScanList FAILED — {msg}",
@@ -1019,7 +1062,12 @@ class TowerScanner:
             )
             return False, [], msg
 
-        freqs = parse_scan_list(raw)
+        try:
+            freqs = parse_scan_list(raw)
+        except Exception as exc:
+            err = f"parse_scan_list failed: {exc}"
+            self._log(f"[APPLY] {ip}: GET rfScanList parse error — {err}", "warning")
+            return False, [], err
         self._log(
             f"[APPLY] {ip}: GET rfScanList = '{raw}' → {freqs}",
             "info",
@@ -1035,6 +1083,10 @@ class TowerScanner:
         Used by make-before-break strategy: read current bandwidth scan list before
         merging with the new bandwidth so that SM can still re-register if AP rolls back.
 
+        Tries ALL configured SNMP communities (not just the mapped one) so it works
+        correctly even when device_community_map is empty (Issue #2).
+        Uses SM_SNMP_TIMEOUT / SM_SNMP_RETRIES for higher-latency SM links (Issue #3).
+
         Args:
             ip: SM IP address.
 
@@ -1042,7 +1094,7 @@ class TowerScanner:
             Tuple (success: bool, bws: List[str], message: str).
             On failure returns (False, [], error_message).
         """
-        ok, raw, msg = self._snmp_get_oid(ip, self.SM_BW_SCAN_OID)
+        ok, raw, msg = self._snmp_get_oid_sm(ip, self.SM_BW_SCAN_OID)
         if not ok:
             self._log(
                 f"[APPLY] {ip}: GET bandwidthScan FAILED — {msg}",
