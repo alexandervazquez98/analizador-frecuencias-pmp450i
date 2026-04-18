@@ -43,6 +43,9 @@ def scanner():
     mock.set_broadcast_retry.return_value = (True, "OK")
     mock.reboot_if_required.return_value = (True, "OK")
     mock._snmp_get.return_value = (True, 5180000, "OK")
+    # Make-before-break GET stubs — return empty current config by default
+    mock.get_sm_scan_list.return_value = (True, [], "OK")
+    mock.get_sm_bandwidth_scan.return_value = (True, [], "OK")
     return mock
 
 
@@ -438,7 +441,7 @@ class TestBandwidthApply:
         assert call_order == ["bw", "rf"], f"Expected bw then rf, got: {call_order}"
 
     def test_bw_scan_passes_width_mhz(self, manager, db, scanner):
-        """GIVEN channel_width_mhz=30 THEN set_sm_bandwidth_scan receives 30."""
+        """GIVEN channel_width_mhz=30 and no current bw THEN set_sm_bandwidth_scan receives [30]."""
         _insert_scan(
             db,
             "BW2",
@@ -453,7 +456,9 @@ class TestBandwidthApply:
         )
 
         args, _ = scanner.set_sm_bandwidth_scan.call_args
-        assert args[1] == 30.0
+        # Make-before-break: receives list of ints (merged current + new)
+        # With empty current bws, merged = [30]
+        assert args[1] == [30]
 
     def test_bw_scan_not_called_when_no_channel_width(self, manager, db, scanner):
         """GIVEN channel_width_mhz=None THEN set_sm_bandwidth_scan is NOT called."""
@@ -563,3 +568,200 @@ class TestBandwidthApply:
 
         assert result["state"] == "completed"
         assert result["success"] is True
+
+
+# ── Make-Before-Break ─────────────────────────────────────────────────────────
+
+
+class TestMakeBeforeBreak:
+    """Tests for the make-before-break GET → merge → SET strategy in Step 2."""
+
+    def test_get_scan_list_called_before_set(self, manager, db, scanner):
+        """GIVEN SM with current freqs THEN get_sm_scan_list is called before set_sm_scan_list."""
+        call_order = []
+        scanner.get_sm_scan_list.side_effect = lambda *a, **kw: (
+            call_order.append("GET_RF"),
+            (True, [3650000], "OK"),
+        )[1]
+        scanner.set_sm_scan_list.side_effect = lambda *a, **kw: (
+            call_order.append("SET_RF"),
+            (True, "OK"),
+        )[1]
+
+        _insert_scan(
+            db,
+            "MBB1",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        manager.run_apply("MBB1", 3652.5, "TORRE-01", "admin", force=False)
+
+        assert call_order.index("GET_RF") < call_order.index("SET_RF"), (
+            "GET rfScanList must be called BEFORE SET rfScanList"
+        )
+
+    def test_get_bandwidth_scan_called_before_set(self, manager, db, scanner):
+        """GIVEN channel_width_mhz=20 THEN get_sm_bandwidth_scan called before set_sm_bandwidth_scan."""
+        call_order = []
+        scanner.get_sm_bandwidth_scan.side_effect = lambda *a, **kw: (
+            call_order.append("GET_BW"),
+            (True, ["15.0 MHz"], "OK"),
+        )[1]
+        scanner.set_sm_bandwidth_scan.side_effect = lambda *a, **kw: (
+            call_order.append("SET_BW"),
+            (True, "OK"),
+        )[1]
+
+        _insert_scan(
+            db,
+            "MBB2",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        manager.run_apply(
+            "MBB2", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
+        )
+
+        assert call_order.index("GET_BW") < call_order.index("SET_BW"), (
+            "GET bandwidthScan must be called BEFORE SET bandwidthScan"
+        )
+
+    def test_merged_freq_list_contains_both_current_and_new(self, manager, db, scanner):
+        """GIVEN current=[3650000] and new=3652500 THEN set_sm_scan_list receives [3650000, 3652500]."""
+        scanner.get_sm_scan_list.return_value = (True, [3650000], "OK")
+
+        _insert_scan(
+            db,
+            "MBB3",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        manager.run_apply("MBB3", 3652.5, "TORRE-01", "admin", force=False)
+
+        args, _ = scanner.set_sm_scan_list.call_args
+        merged = args[1]
+        assert 3650000 in merged, "Current freq must be in merged list"
+        assert 3652500 in merged, "New freq must be in merged list"
+
+    def test_get_failure_falls_back_to_new_only(self, manager, db, scanner):
+        """GIVEN GET rfScanList fails THEN set_sm_scan_list receives only the new frequency."""
+        scanner.get_sm_scan_list.return_value = (False, [], "Timeout")
+
+        _insert_scan(
+            db,
+            "MBB4",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("MBB4", 3652.5, "TORRE-01", "admin", force=False)
+
+        # Apply must still succeed (GET failure is non-fatal)
+        assert result["state"] == "completed"
+        args, _ = scanner.set_sm_scan_list.call_args
+        merged = args[1]
+        assert merged == [3652500], f"Expected [3652500] on GET failure, got {merged}"
+
+    def test_deduplication_when_new_freq_already_in_current(self, manager, db, scanner):
+        """GIVEN current=[3652500] and new=3652500 THEN merged list has no duplicate."""
+        scanner.get_sm_scan_list.return_value = (True, [3652500], "OK")
+
+        _insert_scan(
+            db,
+            "MBB5",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        manager.run_apply("MBB5", 3652.5, "TORRE-01", "admin", force=False)
+
+        args, _ = scanner.set_sm_scan_list.call_args
+        merged = args[1]
+        assert merged.count(3652500) == 1, f"Duplicate found: {merged}"
+
+    def test_merged_bw_contains_both_current_and_new(self, manager, db, scanner):
+        """GIVEN current bw=['15.0 MHz'] and new=20 THEN set_sm_bandwidth_scan receives [15, 20]."""
+        scanner.get_sm_bandwidth_scan.return_value = (True, ["15.0 MHz"], "OK")
+
+        _insert_scan(
+            db,
+            "MBB6",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        manager.run_apply(
+            "MBB6", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
+        )
+
+        args, _ = scanner.set_sm_bandwidth_scan.call_args
+        merged_bws = args[1]
+        assert 15 in merged_bws, "Current bw (15) must be in merged list"
+        assert 20 in merged_bws, "New bw (20) must be in merged list"
+
+    def test_bw_get_failure_falls_back_to_new_only(self, manager, db, scanner):
+        """GIVEN GET bandwidthScan fails THEN set_sm_bandwidth_scan receives only [new_bw]."""
+        scanner.get_sm_bandwidth_scan.return_value = (False, [], "Timeout")
+
+        _insert_scan(
+            db,
+            "MBB7",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply(
+            "MBB7", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
+        )
+
+        assert result["state"] == "completed"
+        args, _ = scanner.set_sm_bandwidth_scan.call_args
+        assert args[1] == [20], f"Expected [20] on GET failure, got {args[1]}"
+
+    def test_full_flow_get_merge_set(self, manager, db, scanner):
+        """GIVEN full make-before-break flow THEN state is 'completed' with merged values sent."""
+        scanner.get_sm_scan_list.return_value = (True, [3650000], "OK")
+        scanner.get_sm_bandwidth_scan.return_value = (True, ["15.0 MHz"], "OK")
+
+        _insert_scan(
+            db,
+            "MBB8",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply(
+            "MBB8", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
+        )
+
+        assert result["state"] == "completed"
+        assert result["success"] is True
+
+        # rfScanList: should have merged [3650000, 3652500]
+        rf_args, _ = scanner.set_sm_scan_list.call_args
+        assert 3650000 in rf_args[1]
+        assert 3652500 in rf_args[1]
+
+        # bandwidthScan: should have merged [15, 20]
+        bw_args, _ = scanner.set_sm_bandwidth_scan.call_args
+        assert 15 in bw_args[1]
+        assert 20 in bw_args[1]

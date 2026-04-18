@@ -263,3 +263,198 @@ class TestSetSmBandwidthScan:
             with patch.object(scanner, "_log") as mock_log:
                 scanner.set_sm_bandwidth_scan("192.168.1.20", 20)
                 assert mock_log.called
+
+    def test_accepts_list_of_bandwidths(self, scanner):
+        """GIVEN [15, 20] THEN value is '15.0 MHz, 20.0 MHz' (make-before-break)."""
+        with patch.object(
+            scanner, "_snmp_set_string", return_value=(True, "OK")
+        ) as mock_set:
+            success, _ = scanner.set_sm_bandwidth_scan("192.168.1.20", [15, 20])
+        assert success is True
+        _, kwargs = mock_set.call_args
+        assert kwargs.get("value") == "15.0 MHz, 20.0 MHz"
+
+    def test_list_single_element_same_as_scalar(self, scanner):
+        """GIVEN [20] (list with one element) THEN value is '20.0 MHz' (backward compat)."""
+        with patch.object(
+            scanner, "_snmp_set_string", return_value=(True, "OK")
+        ) as mock_set:
+            success, _ = scanner.set_sm_bandwidth_scan("192.168.1.20", [20])
+        assert success is True
+        _, kwargs = mock_set.call_args
+        assert kwargs.get("value") == "20.0 MHz"
+
+    def test_list_invalid_bw_returns_error(self, scanner):
+        """GIVEN [20, 99] (99 is invalid) THEN returns (False, error) without SNMP call."""
+        with patch.object(
+            scanner, "_snmp_set_string", return_value=(True, "OK")
+        ) as mock_set:
+            success, msg = scanner.set_sm_bandwidth_scan("192.168.1.20", [20, 99])
+        assert success is False
+        assert "99" in msg
+        mock_set.assert_not_called()
+
+    def test_scalar_backward_compat_still_works(self, scanner):
+        """GIVEN scalar int 30 THEN behaves exactly as before (backward compat)."""
+        with patch.object(
+            scanner, "_snmp_set_string", return_value=(True, "OK")
+        ) as mock_set:
+            success, _ = scanner.set_sm_bandwidth_scan("192.168.1.20", 30)
+        assert success is True
+        _, kwargs = mock_set.call_args
+        assert kwargs.get("value") == "30.0 MHz"
+
+
+# ── get_sm_scan_list() ────────────────────────────────────────────────────────
+
+
+class TestGetSmScanList:
+    """Tests for TowerScanner.get_sm_scan_list() — rfScanList GET via _snmp_get_oid()."""
+
+    def test_returns_parsed_freq_list_on_success(self, scanner):
+        """GIVEN SNMP GET returns '3650000, 3660000' THEN returns (True, [3650000, 3660000], 'OK')."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "3650000, 3660000", "OK")
+        ):
+            ok, freqs, msg = scanner.get_sm_scan_list("192.168.1.20")
+        assert ok is True
+        assert freqs == [3650000, 3660000]
+        assert msg == "OK"
+
+    def test_returns_empty_list_on_snmp_failure(self, scanner):
+        """GIVEN SNMP GET fails THEN returns (False, [], error_msg)."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(False, "", "Timeout")
+        ):
+            ok, freqs, msg = scanner.get_sm_scan_list("192.168.1.20")
+        assert ok is False
+        assert freqs == []
+        assert "Timeout" in msg
+
+    def test_parses_single_frequency(self, scanner):
+        """GIVEN SNMP GET returns '3650000' THEN returns [3650000]."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "3650000", "OK")
+        ):
+            ok, freqs, msg = scanner.get_sm_scan_list("192.168.1.20")
+        assert ok is True
+        assert freqs == [3650000]
+
+    def test_parses_multiple_frequencies(self, scanner):
+        """GIVEN '3647500, 3650000, 3652500' THEN returns list of 3 ints."""
+        with patch.object(
+            scanner,
+            "_snmp_get_oid",
+            return_value=(True, "3647500, 3650000, 3652500", "OK"),
+        ):
+            ok, freqs, _ = scanner.get_sm_scan_list("192.168.1.20")
+        assert freqs == [3647500, 3650000, 3652500]
+
+    def test_handles_empty_response(self, scanner):
+        """GIVEN SNMP GET returns empty string THEN returns (True, [], 'OK')."""
+        with patch.object(scanner, "_snmp_get_oid", return_value=(True, "", "OK")):
+            ok, freqs, msg = scanner.get_sm_scan_list("192.168.1.20")
+        assert ok is True
+        assert freqs == []
+
+    def test_handles_whitespace_only_response(self, scanner):
+        """GIVEN SNMP GET returns whitespace THEN returns (True, [], 'OK')."""
+        with patch.object(scanner, "_snmp_get_oid", return_value=(True, "   ", "OK")):
+            ok, freqs, _ = scanner.get_sm_scan_list("192.168.1.20")
+        assert freqs == []
+
+    def test_uses_rf_scan_list_oid(self, scanner):
+        """GIVEN get_sm_scan_list THEN _snmp_get_oid is called with RF_SCAN_LIST_OID."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "3650000", "OK")
+        ) as mock_get:
+            scanner.get_sm_scan_list("192.168.1.20")
+        _, call_args = mock_get.call_args
+        # _snmp_get_oid(ip, oid) — oid is positional arg [1]
+        positional = mock_get.call_args.args
+        assert positional[1] == TowerScanner.RF_SCAN_LIST_OID
+
+    def test_passes_correct_ip(self, scanner):
+        """GIVEN IP '10.0.0.5' THEN _snmp_get_oid is called with that IP."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "3650000", "OK")
+        ) as mock_get:
+            scanner.get_sm_scan_list("10.0.0.5")
+        positional = mock_get.call_args.args
+        assert positional[0] == "10.0.0.5"
+
+
+# ── get_sm_bandwidth_scan() ───────────────────────────────────────────────────
+
+
+class TestGetSmBandwidthScan:
+    """Tests for TowerScanner.get_sm_bandwidth_scan() — bandwidthScan GET via _snmp_get_oid()."""
+
+    def test_returns_parsed_bw_list_on_success(self, scanner):
+        """GIVEN SNMP GET returns '5.0 MHz, 20.0 MHz' THEN returns (True, ['5.0 MHz', '20.0 MHz'], 'OK')."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "5.0 MHz, 20.0 MHz", "OK")
+        ):
+            ok, bws, msg = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert ok is True
+        assert bws == ["5.0 MHz", "20.0 MHz"]
+        assert msg == "OK"
+
+    def test_returns_empty_list_on_snmp_failure(self, scanner):
+        """GIVEN SNMP GET fails THEN returns (False, [], error_msg)."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(False, "", "No SNMP response")
+        ):
+            ok, bws, msg = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert ok is False
+        assert bws == []
+
+    def test_parses_single_bandwidth(self, scanner):
+        """GIVEN SNMP GET returns '20.0 MHz' THEN returns ['20.0 MHz']."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "20.0 MHz", "OK")
+        ):
+            ok, bws, _ = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert ok is True
+        assert bws == ["20.0 MHz"]
+
+    def test_parses_multiple_bandwidths(self, scanner):
+        """GIVEN '10.0 MHz, 15.0 MHz, 20.0 MHz' THEN returns list of 3 strings."""
+        with patch.object(
+            scanner,
+            "_snmp_get_oid",
+            return_value=(True, "10.0 MHz, 15.0 MHz, 20.0 MHz", "OK"),
+        ):
+            ok, bws, _ = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert bws == ["10.0 MHz", "15.0 MHz", "20.0 MHz"]
+
+    def test_handles_empty_response(self, scanner):
+        """GIVEN SNMP GET returns empty string THEN returns (True, [], 'OK')."""
+        with patch.object(scanner, "_snmp_get_oid", return_value=(True, "", "OK")):
+            ok, bws, msg = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert ok is True
+        assert bws == []
+
+    def test_handles_whitespace_only_response(self, scanner):
+        """GIVEN SNMP GET returns whitespace THEN returns (True, [], 'OK')."""
+        with patch.object(scanner, "_snmp_get_oid", return_value=(True, "  ", "OK")):
+            ok, bws, _ = scanner.get_sm_bandwidth_scan("192.168.1.20")
+        assert bws == []
+
+    def test_uses_sm_bw_scan_oid(self, scanner):
+        """GIVEN get_sm_bandwidth_scan THEN _snmp_get_oid is called with SM_BW_SCAN_OID."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "20.0 MHz", "OK")
+        ) as mock_get:
+            scanner.get_sm_bandwidth_scan("192.168.1.20")
+        positional = mock_get.call_args.args
+        assert positional[1] == TowerScanner.SM_BW_SCAN_OID
+
+    def test_passes_correct_ip(self, scanner):
+        """GIVEN IP '10.0.0.7' THEN _snmp_get_oid is called with that IP."""
+        with patch.object(
+            scanner, "_snmp_get_oid", return_value=(True, "20.0 MHz", "OK")
+        ) as mock_get:
+            scanner.get_sm_bandwidth_scan("10.0.0.7")
+        positional = mock_get.call_args.args
+        assert positional[0] == "10.0.0.7"

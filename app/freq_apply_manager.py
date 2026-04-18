@@ -221,10 +221,72 @@ class FrequencyApplyManager:
             for sm_ip in sm_ips:
                 sm_entry: Dict = {}
 
-                # 2a. SET bandwidthScan (si channel_width disponible)
+                # ── Make-Before-Break: GET current config before SET ──────────
+                # Read current rfScanList and bandwidthScan from SM so we can
+                # merge (not replace) — if AP rolls back, SM can still find it.
+
+                # 2a. GET current rfScanList (best-effort, non-fatal on failure)
+                get_ok, current_freqs, get_msg = self._scanner.get_sm_scan_list(sm_ip)
+                if not get_ok:
+                    logger.warning(
+                        "[APPLY %d] SM %s: GET rfScanList failed (non-fatal) — %s. "
+                        "Falling back to new-only.",
+                        apply_id,
+                        sm_ip,
+                        get_msg,
+                    )
+                    current_freqs = []
+
+                # Merge: deduplicated union of current + new frequency
+                merged_freqs = list(dict.fromkeys(current_freqs + [freq_khz]))
+                logger.info(
+                    "[APPLY] SM %s: merging rfScanList: current=%s + new=%s → merged=%s",
+                    sm_ip,
+                    current_freqs,
+                    [freq_khz],
+                    merged_freqs,
+                )
+
+                # 2b. GET current bandwidthScan (best-effort, non-fatal on failure)
                 if channel_width:
+                    bw_get_ok, current_bws, bw_get_msg = (
+                        self._scanner.get_sm_bandwidth_scan(sm_ip)
+                    )
+                    if not bw_get_ok:
+                        logger.warning(
+                            "[APPLY %d] SM %s: GET bandwidthScan failed (non-fatal) — %s. "
+                            "Falling back to new-only.",
+                            apply_id,
+                            sm_ip,
+                            bw_get_msg,
+                        )
+                        current_bws = []
+
+                    new_bw_str = f"{float(channel_width):.1f} MHz"
+                    # Merge: deduplicated union of current + new bandwidth strings
+                    merged_bws_str = list(dict.fromkeys(current_bws + [new_bw_str]))
+                    logger.info(
+                        "[APPLY] SM %s: merging bandwidthScan: current=%s + new=%s → merged=%s",
+                        sm_ip,
+                        current_bws,
+                        [new_bw_str],
+                        merged_bws_str,
+                    )
+
+                    # Convert merged bandwidth strings back to int list for the setter
+                    # e.g. ["15.0 MHz", "20.0 MHz"] → [15, 20]
+                    merged_bws_int = []
+                    for bw_s in merged_bws_str:
+                        try:
+                            merged_bws_int.append(
+                                int(float(bw_s.replace("MHz", "").strip()))
+                            )
+                        except ValueError:
+                            pass  # Skip malformed values
+
+                    # 2c. SET bandwidthScan with merged list
                     bw_ok, bw_msg = self._scanner.set_sm_bandwidth_scan(
-                        sm_ip, channel_width
+                        sm_ip, merged_bws_int
                     )
                     sm_entry["bw_scan"] = {
                         "success": bw_ok,
@@ -232,10 +294,10 @@ class FrequencyApplyManager:
                     }
                     if bw_ok:
                         logger.info(
-                            "[APPLY %d] SM %s: bandwidthScan=%d MHz OK",
+                            "[APPLY %d] SM %s: bandwidthScan=%s OK",
                             apply_id,
                             sm_ip,
-                            channel_width,
+                            merged_bws_str,
                         )
                     else:
                         # Non-fatal: SM puede seguir con rfScanList
@@ -247,8 +309,8 @@ class FrequencyApplyManager:
                             bw_msg,
                         )
 
-                # 2b. SET rfScanList (frecuencia — siempre)
-                success, msg = self._scanner.set_sm_scan_list(sm_ip, [freq_khz])
+                # 2d. SET rfScanList with merged list (frecuencia — siempre)
+                success, msg = self._scanner.set_sm_scan_list(sm_ip, merged_freqs)
                 sm_entry["success"] = success
                 sm_entry["error"] = msg if not success else None
 
