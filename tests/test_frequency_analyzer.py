@@ -696,9 +696,9 @@ class TestSlidingWindowAnalysis:
 
     def test_sliding_window_step_is_5mhz(self):
         """
-        GIVEN espectro suficiente para múltiples ventanas
+        GIVEN espectro 5 GHz suficiente para múltiples ventanas
         WHEN se ejecuta analyze_spectrum
-        THEN las frecuencias centrales están separadas por el paso de 5 MHz
+        THEN las frecuencias centrales están separadas por 2.5 MHz (grid obligatorio 5 GHz)
         """
         points = make_spectrum_points(freq_start=5000.0, count=20)
         analyzer = FrequencyAnalyzer()
@@ -712,7 +712,7 @@ class TestSlidingWindowAnalysis:
                 for i in range(len(freqs_sorted_by_freq) - 1)
             ]
             for step in steps:
-                assert step == pytest.approx(5.0)
+                assert step == pytest.approx(2.5)
 
 
 # ===========================================================================

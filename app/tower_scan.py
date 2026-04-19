@@ -946,7 +946,7 @@ class TowerScanner:
         """SET bandwidthScan.0 on SM via SNMP — configures allowed channel widths.
 
         OID: .1.3.6.1.4.1.161.19.3.2.1.131.0 (bandwidthScan.0, OctetString)
-        Value format: "20.0 MHz" or "15.0 MHz, 20.0 MHz" (comma-separated).
+        Value format: "20.0 MHz" or "15.0 MHz,20.0 MHz" (comma-separated, no space).
 
         MUST be called BEFORE changing AP bandwidth so the SM knows which
         channel widths to scan for when re-registering after reboot.
@@ -976,9 +976,9 @@ class TowerScanner:
                     f"Ancho de canal {w} MHz no soportado para SM. Válidos: {VALID_BWS}"
                 )
 
-        bw_str = ", ".join(
+        bw_str = ",".join(
             f"{float(w):.1f} MHz" for w in widths
-        )  # → "20.0 MHz" or "15.0 MHz, 20.0 MHz"
+        )  # → "20.0 MHz" or "15.0 MHz,20.0 MHz"
         self._log(
             f"[APPLY] {ip}: SET bandwidthScan = '{bw_str}' (OID {self.SM_BW_SCAN_OID})",
             "info",

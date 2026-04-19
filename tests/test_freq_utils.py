@@ -67,9 +67,9 @@ class TestFormatScanList:
         assert format_scan_list([5180000]) == "5180000"
 
     def test_multiple_frequencies(self):
-        """GIVEN [5180000, 5200000, 5220000] THEN coma+espacio separated string (OID format)."""
+        """GIVEN [5180000, 5200000, 5220000] THEN comma-separated string NO space (OID strict format)."""
         result = format_scan_list([5180000, 5200000, 5220000])
-        assert result == "5180000, 5200000, 5220000"
+        assert result == "5180000,5200000,5220000"
 
     def test_empty_list(self):
         """GIVEN [] THEN returns empty string."""

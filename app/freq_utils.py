@@ -42,18 +42,19 @@ def format_scan_list(freqs_khz: list) -> str:
     """Formatea lista de frecuencias en kHz como OctetString para rfScanList.
 
     El OID rfScanList (1.3.6.1.4.1.161.19.3.2.1.1.0) acepta una cadena
-    de texto con frecuencias separadas por coma y espacio.
+    de texto con frecuencias separadas por coma SIN espacio. El hardware
+    PMP 450i (banda 5 GHz) rechaza con wrongValue si hay espacio tras la coma.
 
     Args:
         freqs_khz: Lista de frecuencias en kHz. Ejemplo: [3550000, 3555000].
 
     Returns:
-        String formateado. Ejemplo: "3550000, 3555000".
+        String formateado. Ejemplo: "3550000,3555000".
         Retorna "" para lista vacía.
     """
     if not freqs_khz:
         return ""
-    return ", ".join(str(f) for f in freqs_khz)
+    return ",".join(str(f) for f in freqs_khz)
 
 
 def parse_scan_list(scan_list_str: str) -> list:

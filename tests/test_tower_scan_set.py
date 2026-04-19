@@ -173,7 +173,7 @@ class TestSetSmScanList:
         value = kwargs.get("value")
         assert "5180000" in value
         assert "5200000" in value
-        assert "," in value  # format_scan_list uses ', '
+        assert "," in value  # format_scan_list uses ',' (no space)
 
     def test_returns_true_on_success(self, scanner):
         """GIVEN successful write THEN returns (True, msg)."""
@@ -279,14 +279,14 @@ class TestSetSmBandwidthScan:
                 assert mock_log.called
 
     def test_accepts_list_of_bandwidths(self, scanner):
-        """GIVEN [15, 20] THEN value is '15.0 MHz, 20.0 MHz' (make-before-break)."""
+        """GIVEN [15, 20] THEN value is '15.0 MHz,20.0 MHz' (make-before-break, no space)."""
         with patch.object(
             scanner, "_snmp_set_string", return_value=(True, "OK")
         ) as mock_set:
             success, _ = scanner.set_sm_bandwidth_scan("192.168.1.20", [15, 20])
         assert success is True
         _, kwargs = mock_set.call_args
-        assert kwargs.get("value") == "15.0 MHz, 20.0 MHz"
+        assert kwargs.get("value") == "15.0 MHz,20.0 MHz"
 
     def test_list_single_element_same_as_scalar(self, scanner):
         """GIVEN [20] (list with one element) THEN value is '20.0 MHz' (backward compat)."""

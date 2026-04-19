@@ -103,12 +103,15 @@ class FrequencyAnalyzer:
 
     # Configuración de ventana deslizante
     DEFAULT_CHANNEL_WIDTH = 20  # MHz - Ancho de banda por defecto
-    # Paso de la ventana deslizante: 1.25 MHz = mitad de la resolución del XML del PMP450i
-    # (que muestrea cada 2.5 MHz). Este es el paso más fino con sentido físico: a cada
-    # incremento de 1.25 MHz, al menos un punto de medición entra o sale de la ventana,
-    # permitiendo encontrar frecuencias centrales que esquivan picos angostos de interferencia.
-    # Impacto: ~4x más candidatos evaluados vs. 5 MHz (aceptable, todo en memoria).
-    SLIDING_STEP = 1.25  # MHz - Mínimo útil dado resolución de 2.5 MHz del instrumento
+    # Paso de la ventana deslizante — dependiente de la banda:
+    #   3 GHz (< 4000 MHz): 1.25 MHz — el hardware soporta pasos finos (50 kHz mínimo).
+    #     Permite encontrar frecuencias centrales que esquivan picos angostos.
+    #   5 GHz (>= 4000 MHz): 2.5 MHz — el hardware SOLO acepta múltiplos exactos de 2.5 MHz.
+    #     Un paso de 1.25 genera candidatos no alineados (e.g. 5134.75 MHz ≠ múltiplo de 2.5)
+    #     que el firmware rechaza con wrongValue.
+    # Impacto de 1.25 MHz: ~4x más candidatos vs. 5 MHz (aceptable, todo en memoria).
+    SLIDING_STEP = 1.25  # MHz — default para banda 3 GHz
+    SLIDING_STEP_5GHZ = 2.5  # MHz — obligatorio para banda 5 GHz
 
     # Rangos de banda PMP450i - 3GHz: 3300-3987 MHz
     BAND_3GHZ_MIN = 3300  # MHz - Límite inferior banda 3GHz
@@ -658,8 +661,18 @@ class FrequencyAnalyzer:
 
         # Generar candidatos con ventana deslizante
         results = []
+        # Seleccionar paso según banda: 5 GHz requiere múltiplos exactos de 2.5 MHz
+        is_5ghz_band = freq_min >= 4000
+        step = self.SLIDING_STEP_5GHZ if is_5ghz_band else self.SLIDING_STEP
+
         # round() inicial: evita trailing decimals en freq_min + width/2
         center = round(freq_min + (width / 2), 3)
+
+        # Snap inicial al grid de la banda para garantizar alineación desde el primer candidato
+        if is_5ghz_band:
+            center = round(
+                round(center / self.SLIDING_STEP_5GHZ) * self.SLIDING_STEP_5GHZ, 3
+            )
 
         while center + (width / 2) <= freq_max:
             score = self.calculate_frequency_score(
@@ -692,8 +705,8 @@ class FrequencyAnalyzer:
             )
 
             # round() en cada paso: previene drift acumulativo de IEEE 754 float
-            # con sumas repetidas de 1.25 (e.g. 4900.0 + 1.25×80 → 4999.9999...)
-            center = round(center + self.SLIDING_STEP, 3)
+            # con sumas repetidas de step (e.g. 4900.0 + 2.5×40 → drift acumulado)
+            center = round(center + step, 3)
 
         # Crear DataFrame y ordenar por puntaje
         df = pd.DataFrame(results)
