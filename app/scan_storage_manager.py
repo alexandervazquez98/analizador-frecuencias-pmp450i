@@ -258,6 +258,7 @@ class ScanStorageManager:
         results: dict,
         duration_seconds: float = None,
         logs: list = None,
+        sm_ips: list = None,
     ) -> None:
         """Mark a scan as completed and persist its results.
 
@@ -266,6 +267,9 @@ class ScanStorageManager:
             results:          Final results dict to store (serialized as JSON).
             duration_seconds: Optional elapsed time in seconds.
             logs:             Optional list of log entries to persist (Issue #7).
+            sm_ips:           Optional list of SM IPs discovered during the scan.
+                              Overwrites the existing sm_ips column so that apply
+                              can find the SMs even when discovery ran at runtime.
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         results_json = _serialize(results)
@@ -282,6 +286,10 @@ class ScanStorageManager:
         if logs_json is not None:
             sets.append("logs = ?")
             params.append(logs_json)
+
+        if sm_ips is not None:
+            sets.append("sm_ips = ?")
+            params.append(_serialize(sm_ips))
 
         params.append(scan_id)
 

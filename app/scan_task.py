@@ -673,6 +673,7 @@ class ScanTask:
                         self.results,
                         duration_seconds=duration,
                         logs=self.logs,
+                        sm_ips=self.sm_ips if self.sm_ips else None,
                     )
                     logger.info(f"[{self.scan_id}] Resultados guardados en DB storage")
                 except Exception as exc:
