@@ -505,3 +505,54 @@ class TestMultibandAnalysis:
         ]
         for col in expected_cols:
             assert col in df.columns, f"Columna faltante: {col}"
+
+
+class TestBandFilter:
+    """Regresión: APSMCrossAnalyzer debe respetar el filtro de banda 3GHz."""
+
+    def test_3ghz_band_filter_excludes_4ghz_candidates(self):
+        """
+        GIVEN un AP de 3 GHz con espectro que incluye puntos en 4000+ MHz
+        WHEN se analiza con config band_3ghz_min=3300 band_3ghz_max=3987
+        THEN ningún candidato recomendado supera 3987 MHz.
+
+        Regresión: bug donde APSMCrossAnalyzer creaba FrequencyAnalyzer() sin config,
+        ignorando el filtro de banda y generando candidatos en 4100+ MHz para equipos 3GHz.
+        """
+        # Espectro AP que cruza la frontera 3/4 GHz (3500-4200 MHz)
+        ap_spectrum = [
+            SpectrumPoint(
+                frequency=3500.0 + i * 25.0,
+                vertical_max=-90.0,
+                vertical_mean=-95.0,
+                horizontal_max=-90.0,
+                horizontal_mean=-95.0,
+            )
+            for i in range(30)  # 3500, 3525, ... 4225 MHz
+        ]
+
+        sm_spectrum = [
+            SpectrumPoint(
+                frequency=3500.0 + i * 25.0,
+                vertical_max=-90.0,
+                vertical_mean=-95.0,
+                horizontal_max=-90.0,
+                horizontal_mean=-95.0,
+            )
+            for i in range(30)
+        ]
+
+        analyzer = APSMCrossAnalyzer(
+            config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+        )
+        sm_data = [SMSpectrumData(ip="10.0.0.1", spectrum_points=sm_spectrum)]
+
+        df, results = analyzer.analyze_multiband_ap_with_sms(
+            ap_spectrum, sm_data, top_n=20, min_channel_width=15
+        )
+
+        for r in results:
+            assert r.frequency <= 3987.0, (
+                f"Candidato fuera de banda 3GHz: {r.frequency} MHz — "
+                f"el filtro band_3ghz_max=3987 no fue aplicado por el cross analyzer"
+            )

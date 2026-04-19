@@ -346,10 +346,9 @@ class ScanTask:
                 # ANALISIS CRUZADO AP-SM
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
-                cross_analyzer = APSMCrossAnalyzer(min_snr=min_snr)
-                freq_analyzer = FrequencyAnalyzer(
-                    config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
-                )
+                band_config = {"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+                cross_analyzer = APSMCrossAnalyzer(min_snr=min_snr, config=band_config)
+                freq_analyzer = FrequencyAnalyzer(config=band_config)
 
                 for i, ap_ip in enumerate(completed_aps):
                     if ap_ip not in ap_xmls:
@@ -446,7 +445,7 @@ class ScanTask:
                                 f"solo de AP"
                             )
                             report = await asyncio.to_thread(
-                                analyze_ap, ap_ip, target_rx
+                                analyze_ap, ap_ip, target_rx, 3300, 3987
                             )
                             analysis_results[ap_ip] = report.to_dict()
 
@@ -591,7 +590,9 @@ class ScanTask:
                 for i, ip in enumerate(completed_aps):
                     logger.info(f"[{self.scan_id}] Analizando AP {ip}...")
 
-                    report = await asyncio.to_thread(analyze_ap, ip, target_rx)
+                    report = await asyncio.to_thread(
+                        analyze_ap, ip, target_rx, 3300, 3987
+                    )
                     analysis_results[ip] = report.to_dict()
 
                     if ip in ap_xmls:

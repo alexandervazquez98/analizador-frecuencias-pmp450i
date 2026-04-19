@@ -18,14 +18,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SMSpectrumData:
     """Datos de espectro de un Subscriber Module"""
+
     ip: str
     spectrum_points: List[SpectrumPoint]
     is_critical: bool = True  # Todos los SMs son críticos por defecto
-    
+
 
 @dataclass
 class CrossAnalysisResult:
     """Resultado del análisis cruzado AP-SM"""
+
     frequency: float
     bandwidth: int  # MHz
     ap_score: float
@@ -34,20 +36,20 @@ class CrossAnalysisResult:
 
     # SNR real calculado por SM (change-007)
     sm_snr_worst: float  # Peor SNR real entre todos los SMs evaluados
-    
+
     # Datos de SMs
     sm_worst_noise: float  # Peor ruido entre todos los SMs
-    sm_avg_noise: float    # Promedio de ruido de SMs
-    sm_count_vetoed: int   # Cantidad de SMs que vetaron esta frecuencia
-    
+    sm_avg_noise: float  # Promedio de ruido de SMs
+    sm_count_vetoed: int  # Cantidad de SMs que vetaron esta frecuencia
+
     # Performance
     throughput_est: float  # Mbps
-    
+
     # Score combinado
     combined_score: float
     is_viable: bool
     veto_reason: str
-    
+
     # Metadata de Calidad (Added for web_app compatibility)
     quality_level: str
     warnings: List[str]
@@ -64,7 +66,7 @@ class APSMCrossAnalyzer:
     Analizador de frecuencias con cruce AP-SM
     Optimizado para tráfico Uplink (CCTV)
     """
-    
+
     # SNR mínimo por defecto (configurable vía min_snr en config del scan)
     # 18 dB → umbral mínimo para 16QAM confiable con fade margin aplicado
     DEFAULT_MIN_SNR = 18  # dB
@@ -75,11 +77,11 @@ class APSMCrossAnalyzer:
     # Penalizaciones de score combinado
     VETO_PENALTY = -50  # Puntos por cada SM que veta
     SM_NOISE_WEIGHT = 0.5  # Peso del ruido de SMs en score combinado
-    
-    def __init__(self, min_snr: float = None):
-        self.analyzer = FrequencyAnalyzer()
+
+    def __init__(self, min_snr: float = None, config: Dict = None):
+        self.analyzer = FrequencyAnalyzer(config=config or {})
         self.min_snr = min_snr if min_snr is not None else self.DEFAULT_MIN_SNR
-        
+
     def _evaluate_channel_snr(
         self,
         ruido_mimo_peor: float,
@@ -162,11 +164,15 @@ class APSMCrossAnalyzer:
             logger.info(f"--- Evaluando ancho de canal: {bw} MHz ---")
             try:
                 _, results = self.analyze_ap_with_sms(
-                    ap_spectrum, sm_data, top_n,
+                    ap_spectrum,
+                    sm_data,
+                    top_n,
                     bandwidth=bw,
                     target_rx_level=target_rx_level,
                 )
-                logger.info(f"--- Ancho {bw} MHz: {len(results)} candidatos encontrados ---")
+                logger.info(
+                    f"--- Ancho {bw} MHz: {len(results)} candidatos encontrados ---"
+                )
                 all_results.extend(results)
             except Exception as e:
                 logger.error(f"Error analizando ancho {bw} MHz: {e}")
@@ -177,7 +183,7 @@ class APSMCrossAnalyzer:
         df_combined = self._create_combined_dataframe(all_results)
 
         return df_combined, all_results
-    
+
     def analyze_ap_with_sms(
         self,
         ap_spectrum: List[SpectrumPoint],
@@ -205,11 +211,11 @@ class APSMCrossAnalyzer:
         cross_results = []
 
         for idx, row in top_ap_frequencies.iterrows():
-            freq = row['Frecuencia Central (MHz)']
-            ap_score = row['Puntaje Final']
-            ap_noise = row['Ruido Promedio (dBm)']
-            throughput = row.get('Throughput Est. (Mbps)', 0)
-            snr = row.get('SNR Estimado (dB)', 0)
+            freq = row["Frecuencia Central (MHz)"]
+            ap_score = row["Puntaje Final"]
+            ap_noise = row["Ruido Promedio (dBm)"]
+            throughput = row.get("Throughput Est. (Mbps)", 0)
+            snr = row.get("SNR Estimado (dB)", 0)
 
             result = self._analyze_frequency_in_sms(
                 freq,
@@ -228,7 +234,7 @@ class APSMCrossAnalyzer:
         df_combined = self._create_combined_dataframe(cross_results)
 
         return df_combined, cross_results
-    
+
     def _analyze_frequency_in_sms(
         self,
         frequency: float,
@@ -262,20 +268,21 @@ class APSMCrossAnalyzer:
         for sm in sm_data:
             # Obtener puntos de espectro en esta ventana
             window_points = [
-                p for p in sm.spectrum_points
-                if freq_min <= p.frequency <= freq_max
+                p for p in sm.spectrum_points if freq_min <= p.frequency <= freq_max
             ]
 
             if not window_points:
-                sm_details.append({
-                    'ip': sm.ip,
-                    'noise_v': None,
-                    'noise_h': None,
-                    'noise_mimo_worst': None,
-                    'snr_real': None,
-                    'vetoed': False,
-                    'reason': 'Sin datos en ventana de canal',
-                })
+                sm_details.append(
+                    {
+                        "ip": sm.ip,
+                        "noise_v": None,
+                        "noise_h": None,
+                        "noise_mimo_worst": None,
+                        "snr_real": None,
+                        "vetoed": False,
+                        "reason": "Sin datos en ventana de canal",
+                    }
+                )
                 continue
 
             # Peor ruido MIMO: conservador, usa MAX de cada polaridad
@@ -296,15 +303,17 @@ class APSMCrossAnalyzer:
             if not is_viable_sm:
                 vetoed_count += 1
 
-            sm_details.append({
-                'ip': sm.ip,
-                'noise_v': round(noise_v, 2),
-                'noise_h': round(noise_h, 2),
-                'noise_mimo_worst': round(ruido_mimo_peor, 2),
-                'snr_real': round(snr_real, 1),
-                'vetoed': not is_viable_sm,
-                'reason': reason,
-            })
+            sm_details.append(
+                {
+                    "ip": sm.ip,
+                    "noise_v": round(noise_v, 2),
+                    "noise_h": round(noise_h, 2),
+                    "noise_mimo_worst": round(ruido_mimo_peor, 2),
+                    "snr_real": round(snr_real, 1),
+                    "vetoed": not is_viable_sm,
+                    "reason": reason,
+                }
+            )
 
         # Métricas agregadas de SMs
         if sm_noises:
@@ -377,47 +386,49 @@ class APSMCrossAnalyzer:
             requires_action=bool(not is_viable),
             sm_details=sm_details,
         )
-    
+
     def _create_combined_dataframe(
-        self,
-        results: List[CrossAnalysisResult]
+        self, results: List[CrossAnalysisResult]
     ) -> pd.DataFrame:
         """Crear DataFrame con resultados combinados"""
         data = []
 
         for r in results:
-            data.append({
-                'Frecuencia (MHz)': r.frequency,
-                'Ancho (MHz)': r.bandwidth,
-                'Score AP': r.ap_score,
-                'Throughput Est. (Mbps)': r.throughput_est,
-                'Ruido AP (dBm)': round(r.ap_noise_avg, 2),
-                'SNR Estimado AP (dB)': round(r.ap_snr, 2),
-                'Peor Ruido SMs (dBm)': round(r.sm_worst_noise, 2),
-                'Peor SNR SM (dB)': round(r.sm_snr_worst, 2),
-                'SMs Vetados': r.sm_count_vetoed,
-                'Score Final': r.combined_score,
-                'Estado': 'Viable' if r.is_viable else 'VETADO',
-                'Detalle': r.veto_reason,
-            })
-        
+            data.append(
+                {
+                    "Frecuencia (MHz)": r.frequency,
+                    "Ancho (MHz)": r.bandwidth,
+                    "Score AP": r.ap_score,
+                    "Throughput Est. (Mbps)": r.throughput_est,
+                    "Ruido AP (dBm)": round(r.ap_noise_avg, 2),
+                    "SNR Estimado AP (dB)": round(r.ap_snr, 2),
+                    "Peor Ruido SMs (dBm)": round(r.sm_worst_noise, 2),
+                    "Peor SNR SM (dB)": round(r.sm_snr_worst, 2),
+                    "SMs Vetados": r.sm_count_vetoed,
+                    "Score Final": r.combined_score,
+                    "Estado": "Viable" if r.is_viable else "VETADO",
+                    "Detalle": r.veto_reason,
+                }
+            )
+
         df = pd.DataFrame(data)
         # Ordenar primero por viabilidad, luego por score
         if not df.empty:
-            df = df.sort_values(['Estado', 'Score Final'], ascending=[False, False]).reset_index(drop=True)
-        
+            df = df.sort_values(
+                ["Estado", "Score Final"], ascending=[False, False]
+            ).reset_index(drop=True)
+
         return df
-    
+
     def get_best_combined_frequency(
-        self,
-        results: List[CrossAnalysisResult]
+        self, results: List[CrossAnalysisResult]
     ) -> Optional[CrossAnalysisResult]:
         """Obtener la mejor frecuencia considerando AP y SMs"""
         if not results:
             return None
-            
+
         viable_results = [r for r in results if r.is_viable]
-        
+
         if viable_results:
             # Ordenar por score combinado
             viable_results.sort(key=lambda x: x.combined_score, reverse=True)
@@ -425,9 +436,11 @@ class APSMCrossAnalyzer:
             # y tienen scores similares (<10% dif), preferir 10MHz?
             # Por simplicidad y robustez del score (que ya incluye penalizaciones), confiamos en el score.
             best = viable_results[0]
-            logger.info(f"Mejor candidata VIABLE: {best.frequency} MHz / {best.bandwidth} MHz (Score: {best.combined_score})")
+            logger.info(
+                f"Mejor candidata VIABLE: {best.frequency} MHz / {best.bandwidth} MHz (Score: {best.combined_score})"
+            )
             return best
-        
+
         # FALLBACK
         logger.warning("Modo Fallback: Sin frecuencias viables.")
         results.sort(key=lambda x: x.combined_score, reverse=True)
@@ -439,20 +452,27 @@ def analyze_ap_and_sms(
     ap_ip: str,
     sm_ips: List[str],
     ap_xml: str,
-    sm_xmls: Dict[str, str]
+    sm_xmls: Dict[str, str],
+    band_3ghz_min: int = FrequencyAnalyzer.BAND_3GHZ_MIN,
+    band_3ghz_max: int = FrequencyAnalyzer.BAND_3GHZ_MAX,
 ) -> Dict:
     """
     Función helper para análisis completo AP-SM MULTIBANDA
+
+    Args:
+        band_3ghz_min: Límite inferior banda 3GHz en MHz (default 3300).
+        band_3ghz_max: Límite superior banda 3GHz en MHz (default 3987).
     """
-    analyzer = APSMCrossAnalyzer()
-    freq_analyzer = FrequencyAnalyzer()
-    
+    band_config = {"band_3ghz_min": band_3ghz_min, "band_3ghz_max": band_3ghz_max}
+    analyzer = APSMCrossAnalyzer(config=band_config)
+    freq_analyzer = FrequencyAnalyzer(config=band_config)
+
     # Parsear espectro del AP
     ap_spectrum = freq_analyzer.parse_spectrum_xml(ap_xml)
-    
+
     if not ap_spectrum:
-        return {'error': 'Error parseando espectro del AP', 'ap_ip': ap_ip}
-    
+        return {"error": "Error parseando espectro del AP", "ap_ip": ap_ip}
+
     # Parsear espectro de SMs
     sm_data = []
     for sm_ip in sm_ips:
@@ -461,51 +481,55 @@ def analyze_ap_and_sms(
         sm_spectrum = freq_analyzer.parse_spectrum_xml(sm_xmls[sm_ip])
         if sm_spectrum:
             sm_data.append(SMSpectrumData(ip=sm_ip, spectrum_points=sm_spectrum))
-    
+
     if not sm_data:
         # Fallback a análisis AP-ONLY (solo 20MHz por defecto o lo que sea mejor?)
         # Para mantener compatibilidad, hacemos análisis multibanda del AP solo
         logger.info("Analizando AP Multibanda (Sin SMs)...")
         results = []
         for bw in [20, 15, 10, 5]:
-           df = freq_analyzer.analyze_spectrum(ap_spectrum, bandwidth=bw)
-           if not df.empty:
-               best = df.iloc[0].to_dict()
-               best['bandwidth'] = bw
-               results.append(best)
-        
+            df = freq_analyzer.analyze_spectrum(ap_spectrum, bandwidth=bw)
+            if not df.empty:
+                best = df.iloc[0].to_dict()
+                best["bandwidth"] = bw
+                results.append(best)
+
         # Ordenar por puntaje
-        results.sort(key=lambda x: x['Puntaje Final'], reverse=True)
+        results.sort(key=lambda x: x["Puntaje Final"], reverse=True)
         best_overall = results[0] if results else None
-        
+
         return {
-            'ap_ip': ap_ip,
-            'analysis_mode': 'AP_ONLY_MULTIBAND',
-            'best_frequency': best_overall
+            "ap_ip": ap_ip,
+            "analysis_mode": "AP_ONLY_MULTIBAND",
+            "best_frequency": best_overall,
         }
-    
+
     # Análisis cruzado multibanda
     df_combined, cross_results = analyzer.analyze_multiband_ap_with_sms(
         ap_spectrum,
         sm_data,
-        top_n=20 # Increase to 20 per BW (Total ~80 candidates potentially)
+        top_n=20,  # Increase to 20 per BW (Total ~80 candidates potentially)
     )
-    
+
     best_combined = analyzer.get_best_combined_frequency(cross_results)
-    
+
     return {
-        'ap_ip': ap_ip,
-        'sm_count': len(sm_data),
-        'analysis_mode': 'AP_SM_CROSS_MULTIBAND',
-        'combined_ranking': df_combined.to_dict('records')[:50], # Retornar hasta 50 resultados para dar opciones al frontend
-        'best_combined_frequency': {
-            'frequency': best_combined.frequency,
-            'bandwidth': best_combined.bandwidth,
-            'throughput_est': best_combined.throughput_est,
-            'ap_score': best_combined.ap_score,
-            'combined_score': best_combined.combined_score,
-            'sm_worst_noise': best_combined.sm_worst_noise,
-            'is_viable': best_combined.is_viable,
-            'veto_reason': best_combined.veto_reason
-        } if best_combined else None
+        "ap_ip": ap_ip,
+        "sm_count": len(sm_data),
+        "analysis_mode": "AP_SM_CROSS_MULTIBAND",
+        "combined_ranking": df_combined.to_dict("records")[
+            :50
+        ],  # Retornar hasta 50 resultados para dar opciones al frontend
+        "best_combined_frequency": {
+            "frequency": best_combined.frequency,
+            "bandwidth": best_combined.bandwidth,
+            "throughput_est": best_combined.throughput_est,
+            "ap_score": best_combined.ap_score,
+            "combined_score": best_combined.combined_score,
+            "sm_worst_noise": best_combined.sm_worst_noise,
+            "is_viable": best_combined.is_viable,
+            "veto_reason": best_combined.veto_reason,
+        }
+        if best_combined
+        else None,
     }

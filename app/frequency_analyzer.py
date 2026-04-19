@@ -993,7 +993,10 @@ class APAnalysisReport:
 
 
 def analyze_ap(
-    ip: str, target_rx: float = FrequencyAnalyzer.TARGET_LEVEL
+    ip: str,
+    target_rx: float = FrequencyAnalyzer.TARGET_LEVEL,
+    band_3ghz_min: Optional[int] = FrequencyAnalyzer.BAND_3GHZ_MIN,
+    band_3ghz_max: Optional[int] = FrequencyAnalyzer.BAND_3GHZ_MAX,
 ) -> APAnalysisReport:
     """
     Analizar completamente un AP usando Matriz de Calificación
@@ -1001,13 +1004,20 @@ def analyze_ap(
     Args:
         ip: Dirección IP del AP
         target_rx: Nivel de recepción objetivo
+        band_3ghz_min: Límite inferior del rango 3GHz (MHz). None = sin filtro.
+        band_3ghz_max: Límite superior del rango 3GHz (MHz). None = sin filtro.
 
     Returns:
         APAnalysisReport con análisis completo
     """
     report = APAnalysisReport(ip)
-    report = APAnalysisReport(ip)
-    analyzer = FrequencyAnalyzer(config={"target_rx_level": target_rx})
+    analyzer = FrequencyAnalyzer(
+        config={
+            "target_rx_level": target_rx,
+            "band_3ghz_min": band_3ghz_min,
+            "band_3ghz_max": band_3ghz_max,
+        }
+    )
 
     # Descargar datos
     xml_content = analyzer.download_spectrum_data(ip)
