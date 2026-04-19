@@ -169,6 +169,11 @@ class TestStateMachine:
             call_order.append("AP"),
             (True, "OK"),
         )[1]
+        # Verify GET must return the new freq so the gate allows AP change
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [5180000], "OK"),  # verify GET — confirms freq was written
+        ]
 
         _insert_scan(
             db,
@@ -206,6 +211,12 @@ class TestStateMachine:
             (False, "Timeout"),  # SM2 fails
         ]
         scanner.set_frequency.return_value = (True, "OK")
+        # GET calls order: merge-loop (SM1, SM2) then verify-loop (SM1 only — SM2 SET failed).
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # SM1: GET for merge
+            (True, [], "OK"),  # SM2: GET for merge
+            (True, [5180000], "OK"),  # SM1: GET for verify (SM2 skipped — SET failed)
+        ]
 
         _insert_scan(
             db,
@@ -498,6 +509,13 @@ class TestBandwidthApply:
         """GIVEN bandwidthScan fails but rfScanList succeeds THEN state is 'completed'."""
         scanner.set_sm_bandwidth_scan.return_value = (False, "notWritable")
         scanner.set_sm_scan_list.return_value = (True, "OK")
+        # Verify GET must confirm freq was written so the gate allows AP change.
+        # bandwidthScan verify is SKIPPED because bw SET failed — gate only checks
+        # bw_scan_ok when the bw SET itself succeeded (no false positive on known failures).
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [5180000], "OK"),  # verify GET
+        ]
 
         _insert_scan(
             db,
@@ -553,6 +571,15 @@ class TestBandwidthApply:
 
     def test_apply_succeeds_with_channel_width(self, manager, db, scanner):
         """GIVEN full apply with channel_width_mhz=20 THEN state is 'completed'."""
+        # Verify GETs must confirm both freq and bw were written.
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [5180000], "OK"),  # verify GET
+        ]
+        scanner.get_sm_bandwidth_scan.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, ["20.0 MHz"], "OK"),  # verify GET
+        ]
         _insert_scan(
             db,
             "BW8",
@@ -755,8 +782,15 @@ class TestMakeBeforeBreak:
 
     def test_full_flow_get_merge_set(self, manager, db, scanner):
         """GIVEN full make-before-break flow THEN state is 'completed' with merged values sent."""
-        scanner.get_sm_scan_list.return_value = (True, [3650000], "OK")
-        scanner.get_sm_bandwidth_scan.return_value = (True, ["15.0 MHz"], "OK")
+        # merge GETs return current config; verify GETs return the merged config (confirmed).
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [3650000], "OK"),  # merge GET — current freq
+            (True, [3650000, 3652500], "OK"),  # verify GET — new freq confirmed
+        ]
+        scanner.get_sm_bandwidth_scan.side_effect = [
+            (True, ["15.0 MHz"], "OK"),  # merge GET — current bw
+            (True, ["15.0 MHz", "20.0 MHz"], "OK"),  # verify GET — new bw confirmed
+        ]
 
         _insert_scan(
             db,
@@ -831,3 +865,138 @@ class TestMakeBeforeBreak:
         # Apply succeeds (AP succeeded; SM was skipped, not failed)
         assert result["state"] == "completed"
         assert result["ap_result"]["success"] is True
+
+
+# ── SM Verify Gate ────────────────────────────────────────────────────────────
+
+
+class TestSMVerifyGate:
+    """Tests for Step 2f: AP is blocked if SM verify returns scan_list_ok=False."""
+
+    def test_ap_blocked_when_sm_verify_fails(self, manager, db, scanner):
+        """GIVEN SM SET succeeds but verify GET does not contain new freq THEN AP is NOT changed."""
+        # SET OK, but verify GET returns old list without the new freq
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET — no existing freqs
+            (
+                True,
+                [],
+                "OK",
+            ),  # verify GET — freq NOT confirmed (hardware rejected silently)
+        ]
+
+        _insert_scan(
+            db,
+            "VG1",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("VG1", 3652.5, "TORRE-01", "admin", force=False)
+
+        # AP SET must NOT have been called
+        scanner.set_frequency.assert_not_called()
+        assert result["state"] == "failed"
+        assert result["success"] is False
+        assert any("BLOCKED" in e for e in result["errors"])
+
+    def test_ap_proceeds_when_all_sms_verified(self, manager, db, scanner):
+        """GIVEN all SMs confirm new freq in verify GET THEN AP change proceeds."""
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [3652500], "OK"),  # verify GET — confirmed
+        ]
+
+        _insert_scan(
+            db,
+            "VG2",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("VG2", 3652.5, "TORRE-01", "admin", force=False)
+
+        scanner.set_frequency.assert_called_once_with("192.168.1.10", 3652500)
+        assert result["state"] == "completed"
+
+    def test_ap_proceeds_when_verify_get_indeterminate(self, manager, db, scanner):
+        """GIVEN verify GET fails (SNMP error) THEN AP change is NOT blocked (indeterminate)."""
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET — OK
+            (
+                False,
+                [],
+                "SNMP timeout",
+            ),  # verify GET — GET failed, can't confirm NOR deny
+        ]
+
+        _insert_scan(
+            db,
+            "VG3",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("VG3", 3652.5, "TORRE-01", "admin", force=False)
+
+        # scan_list_ok=None → indeterminate → not blocked
+        scanner.set_frequency.assert_called_once_with("192.168.1.10", 3652500)
+        assert result["state"] == "completed"
+        assert result["sm_results"]["192.168.1.20"]["verify"]["scan_list_ok"] is None
+
+    def test_gate_only_blocks_on_explicit_false(self, manager, db, scanner):
+        """GIVEN 2 SMs: one verified, one indeterminate THEN AP proceeds (no explicit False)."""
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # SM1 merge GET
+            (True, [], "OK"),  # SM2 merge GET
+            (True, [3652500], "OK"),  # SM1 verify GET — confirmed
+            (False, [], "SNMP timeout"),  # SM2 verify GET — indeterminate
+        ]
+
+        _insert_scan(
+            db,
+            "VG4",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20", "192.168.1.21"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply("VG4", 3652.5, "TORRE-01", "admin", force=False)
+
+        scanner.set_frequency.assert_called_once()
+        assert result["state"] == "completed"
+
+    def test_ap_blocked_when_bw_scan_verify_fails(self, manager, db, scanner):
+        """GIVEN rfScanList verified OK but bandwidthScan NOT confirmed THEN AP is blocked."""
+        scanner.get_sm_scan_list.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [3652500], "OK"),  # verify GET — freq confirmed ✓
+        ]
+        scanner.get_sm_bandwidth_scan.side_effect = [
+            (True, [], "OK"),  # merge GET
+            (True, [], "OK"),  # verify GET — bw NOT confirmed ✗
+        ]
+
+        _insert_scan(
+            db,
+            "VG5",
+            ["192.168.1.10"],
+            sm_ips=["192.168.1.20"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+        result = manager.run_apply(
+            "VG5", 3652.5, "TORRE-01", "admin", force=False, channel_width_mhz=20.0
+        )
+
+        scanner.set_frequency.assert_not_called()
+        assert result["state"] == "failed"
+        assert any("BLOCKED" in e for e in result["errors"])

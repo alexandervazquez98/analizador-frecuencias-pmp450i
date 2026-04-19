@@ -355,6 +355,125 @@ class FrequencyApplyManager:
         else:
             logger.info("[APPLY %d] No SMs in scan — skipping SM step", apply_id)
 
+        # ── Step 2e: VERIFY SM config was actually written ────────────────
+        # After all SETs, read back rfScanList and bandwidthScan from each SM
+        # to confirm the values were persisted.  Non-fatal: AP change proceeds
+        # regardless, but unverified SMs are flagged in sm_results and logged.
+        #
+        # Verification logic:
+        #   - rfScanList  → GET OID .1.0 and check freq_khz is in the list
+        #   - bandwidthScan → GET OID .131.0 and check channel_width is present
+        #
+        # SMs that were skipped (no GET) are not re-verified here.
+        if sm_ips:
+            for sm_ip in sm_ips:
+                entry = sm_results.get(sm_ip, {})
+                if entry.get("skipped_preservation"):
+                    continue  # No point verifying — we never wrote anything
+
+                # Only verify SMs where rfScanList SET succeeded
+                if not entry.get("success"):
+                    continue
+
+                verify: Dict = {}
+
+                # --- Verify rfScanList ---
+                vget_ok, vfreqs, vget_msg = self._scanner.get_sm_scan_list(sm_ip)
+                if vget_ok:
+                    freq_confirmed = freq_khz in vfreqs
+                    verify["scan_list_ok"] = freq_confirmed
+                    if freq_confirmed:
+                        logger.info(
+                            "[APPLY %d] SM %s: VERIFY rfScanList OK — %d kHz confirmed",
+                            apply_id,
+                            sm_ip,
+                            freq_khz,
+                        )
+                    else:
+                        logger.warning(
+                            "[APPLY %d] SM %s: VERIFY rfScanList FAIL — %d kHz not found in %s",
+                            apply_id,
+                            sm_ip,
+                            freq_khz,
+                            vfreqs,
+                        )
+                        errors.append(
+                            f"SM {sm_ip}: VERIFY — freq {freq_khz} kHz not confirmed in rfScanList"
+                        )
+                else:
+                    verify["scan_list_ok"] = None  # indeterminate
+                    logger.warning(
+                        "[APPLY %d] SM %s: VERIFY rfScanList GET failed: %s",
+                        apply_id,
+                        sm_ip,
+                        vget_msg,
+                    )
+
+                # --- Verify bandwidthScan (solo si el SET de bw tuvo éxito) ---
+                # Si el SET falló (non-fatal), no verificamos — ya está en errors
+                # y verificar solo agregaría un falso positivo al gate.
+                if channel_width and entry.get("bw_scan", {}).get("success") is True:
+                    bv_ok, bv_bws, bv_msg = self._scanner.get_sm_bandwidth_scan(sm_ip)
+                    if bv_ok:
+                        # Normalize to int for comparison (firmware may return "20.0 MHz")
+                        bv_ints = []
+                        for bw_s in bv_bws:
+                            try:
+                                bv_ints.append(
+                                    int(float(bw_s.replace("MHz", "").strip()))
+                                )
+                            except (ValueError, AttributeError):
+                                pass
+                        bw_confirmed = channel_width in bv_ints
+                        verify["bw_scan_ok"] = bw_confirmed
+                        if bw_confirmed:
+                            logger.info(
+                                "[APPLY %d] SM %s: VERIFY bandwidthScan OK — %d MHz confirmed",
+                                apply_id,
+                                sm_ip,
+                                channel_width,
+                            )
+                        else:
+                            logger.warning(
+                                "[APPLY %d] SM %s: VERIFY bandwidthScan FAIL — %d MHz not found in %s",
+                                apply_id,
+                                sm_ip,
+                                channel_width,
+                                bv_bws,
+                            )
+                            errors.append(
+                                f"SM {sm_ip}: VERIFY — bw {channel_width} MHz not confirmed in bandwidthScan"
+                            )
+                    else:
+                        verify["bw_scan_ok"] = None  # indeterminate
+                        logger.warning(
+                            "[APPLY %d] SM %s: VERIFY bandwidthScan GET failed: %s",
+                            apply_id,
+                            sm_ip,
+                            bv_msg,
+                        )
+
+                sm_results[sm_ip]["verify"] = verify
+
+        # ── Step 2f: GATE — block AP if any SM failed verification ───────
+        # A SM that had a successful SET but whose config is NOT confirmed by
+        # a subsequent GET would be left without the new frequency in its scan
+        # list.  Changing the AP while that SM is unconfirmed means the SM
+        # cannot re-register on the new frequency → permanent outage for that SM.
+        #
+        # Block rule: if scan_list_ok is explicitly False (not None/indeterminate)
+        # for ANY SM → abort, do not touch AP, set state to failed.
+        #
+        # scan_list_ok=None (GET failed) is treated as indeterminate — we allow
+        # the AP change because we cannot confirm the write failed either; the
+        # operator can investigate via logs.
+        sm_verify_blocked: List[str] = [
+            sm_ip
+            for sm_ip, entry in sm_results.items()
+            if entry.get("verify", {}).get("scan_list_ok") is False
+            or entry.get("verify", {}).get("bw_scan_ok") is False
+        ]
+
         sm_results_json = json.dumps(sm_results)
 
         # ── Step 3: Update state to sms_applied ──────────────────────────
@@ -364,8 +483,50 @@ class FrequencyApplyManager:
             sm_results=sm_results_json,
         )
 
-        # ── Step 4: SET rfFreqCarrier on AP (AP-last, always after SMs) ──
-        # Spec: AP SET must occur regardless of SM partial failures.
+        if sm_verify_blocked:
+            block_msg = (
+                f"AP change BLOCKED — {len(sm_verify_blocked)} SM(s) did not confirm "
+                f"new config: {sm_verify_blocked}. Fix SM config and retry."
+            )
+            logger.error("[APPLY %d] %s", apply_id, block_msg)
+            errors.append(block_msg)
+            self._db.update_frequency_apply_status(
+                apply_id=apply_id,
+                state="failed",
+                ap_result=json.dumps({"success": False, "error": block_msg}),
+                sm_results=sm_results_json,
+                error=block_msg,
+                completed=True,
+            )
+            self._log_audit(
+                apply_id=apply_id,
+                scan_id=scan_id,
+                tower_id=tower_id,
+                freq_khz=freq_khz,
+                applied_by=applied_by,
+                final_state="failed",
+                sm_count=len(sm_ips),
+                failed_sm_count=len(sm_failures),
+                skipped_sm_count=len(sm_skipped),
+                ap_success=False,
+                errors=errors,
+            )
+            return {
+                "success": False,
+                "apply_id": apply_id,
+                "state": "failed",
+                "freq_khz": freq_khz,
+                "channel_width_mhz": channel_width,
+                "channel_width_result": None,
+                "contention_slots_ok": None,
+                "broadcast_retry_ok": None,
+                "reboot_ok": None,
+                "sm_results": sm_results,
+                "ap_result": {"success": False, "error": block_msg},
+                "errors": errors,
+            }
+
+        # ── Step 4: SET rfFreqCarrier on AP (AP-last, only after SM verify) ──
         ap_success, ap_msg = self._scanner.set_frequency(ap_ip, freq_khz)
         ap_result = {"success": ap_success, "error": ap_msg if not ap_success else None}
         ap_result_json = json.dumps(ap_result)
