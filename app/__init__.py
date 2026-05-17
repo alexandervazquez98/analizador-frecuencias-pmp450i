@@ -14,6 +14,9 @@ from logging.handlers import RotatingFileHandler
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(_project_root, ".env"))
 
+# ── Feature Flags ────────────────────────────────────────────────────────────
+SM_SACRIFICE_ENABLED = os.getenv("FEATURE_SM_SACRIFICE", "false").lower() == "true"
+
 
 def configure_logging():
     """

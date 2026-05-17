@@ -194,6 +194,10 @@ def start_scan(audit_manager=None):
         config.setdefault("max_pol_diff", defaults["max_polarization_diff"])
         config.setdefault("channel_width", defaults["channel_width"])
         config.setdefault("min_channel_width", defaults["min_channel_width"])
+        # feat-sm-sacrifice: scenario-aware sacrifice configuration
+        config.setdefault("scenario", data.get("config", {}).get("scenario", data.get("scenario", "LEGACY")))
+        config.setdefault("priority", data.get("config", {}).get("priority", data.get("priority", "uplink")))
+        config.setdefault("override_sm_ips", data.get("config", {}).get("override_sm_ips", data.get("override_sm_ips", [])))
 
         scan_id = str(uuid.uuid4())
 

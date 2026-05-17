@@ -105,6 +105,33 @@
                                     </div>
                                 </div>
 
+                                <!-- feat-sm-sacrifice: Scenario Selector -->
+                                <div class="field-row sm-sacrifice-ui" id="scenarioSelectorRow" style="display:none;">
+                                    <div class="field-group">
+                                        <label class="field-label">Modo de Análisis</label>
+                                        <select class="field-input" id="scenarioSelect">
+                                            <option value="CCTV">CCTV (20% max sacrifice)</option>
+                                            <option value="BALANCED">BALANCED (50% max sacrifice)</option>
+                                            <option value="BEST_EFFORT">BEST_EFFORT (90% max sacrifice)</option>
+                                            <option value="OVERRIDE">OVERRIDE (manual SM selection)</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-group">
+                                        <label class="field-label">Prioridad</label>
+                                        <select class="field-input" id="prioritySelect">
+                                            <option value="uplink">UPLINK</option>
+                                            <option value="downlink">DOWNLINK</option>
+                                            <option value="none">NONE</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Override SM checklist (shown when OVERRIDE selected) -->
+                                <div class="sm-override-panel" id="smOverridePanel" style="display:none;">
+                                    <div class="field-label"><i class="bi bi-sliders"></i> SMs Sacrificables (Override)</div>
+                                    <div id="smOverrideList" class="sm-override-list"></div>
+                                </div>
+
                                 <!-- Recent Scans mini-list -->
                                 <div class="recent-section">
                                     <label class="field-label"><i class="bi bi-clock-history"></i> Recientes</label>

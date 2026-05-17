@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from app.frequency_analyzer import FrequencyAnalyzer, SpectrumPoint
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,14 @@ class CrossAnalysisResult:
     # Detalles por SM
     sm_details: List[Dict]
 
+    # ── SM Sacrifice Tracking (feat-sm-sacrifice) ────────────────────────────
+    sm_count_viable: int = 0
+    sm_count_sacrificed: int = 0
+    sm_count_total: int = 0
+    sacrifice_ratio: float = 0.0
+    sacrificed_sm_ips: List[str] = field(default_factory=list)
+    scenario: str = "LEGACY"  # LEGACY|CCTV|BALANCED|BEST_EFFORT|OVERRIDE
+
 
 class APSMCrossAnalyzer:
     """
@@ -78,9 +86,25 @@ class APSMCrossAnalyzer:
     VETO_PENALTY = -50  # Puntos por cada SM que veta
     SM_NOISE_WEIGHT = 0.5  # Peso del ruido de SMs en score combinado
 
+    # ── Scenario thresholds (feat-sm-sacrifice) ──────────────────────────────
+    # Values represent the minimum viable_ratio (sm_count_viable / sm_count_total)
+    # required to avoid NO VIABLE classification. 1.0 = 0% sacrifice tolerance.
+    SCENARIO_THRESHOLDS = {
+        "LEGACY": 1.0,  # 0% sacrifice — exact pre-change binary gate
+        "CCTV": 0.80,  # 80% viable required → max 20% sacrifice
+        "BALANCED": 0.50,  # 50% viable required → max 50% sacrifice
+        "BEST_EFFORT": 0.10,  # 10% viable required → max 90% sacrifice
+        "OVERRIDE": 1.0,  # 100% pass — operator manually marks sacrificable SMs
+    }
+
     def __init__(self, min_snr: float = None, config: Dict = None):
         self.analyzer = FrequencyAnalyzer(config=config or {})
         self.min_snr = min_snr if min_snr is not None else self.DEFAULT_MIN_SNR
+        # feat-sm-sacrifice: scenario configuration
+        self.config = config or {}
+        self.scenario = self.config.get("scenario", "LEGACY")
+        self.priority = self.config.get("priority", "uplink")
+        self.override_sm_ips = self.config.get("override_sm_ips", [])
 
     def _evaluate_channel_snr(
         self,
@@ -253,11 +277,16 @@ class APSMCrossAnalyzer:
           1. Obtiene el peor ruido MIMO (max de V_max y H_max) en la ventana del canal.
           2. Llama a _evaluate_channel_snr() para calcular el SNR real y decidir viabilidad.
           3. Expone snr_real por SM en sm_details para el frontend.
+
+        Scenario-aware sacrifice logic (feat-sm-sacrifice):
+          - When SM_SACRIFICE_ENABLED=false: LEGACY behavior (binary is_viable gate)
+          - When enabled: viable/sacrificed split based on scenario threshold
         """
         sm_details = []
         sm_noises = []
         sm_snrs = []
-        vetoed_count = 0
+        viable_ips: List[str] = []
+        sacrificed_ips: List[str] = []
         veto_reason = ""
 
         # Ventana de frecuencia (±BW/2)
@@ -279,7 +308,7 @@ class APSMCrossAnalyzer:
                         "noise_h": None,
                         "noise_mimo_worst": None,
                         "snr_real": None,
-                        "vetoed": False,
+                        "sacrificed": False,
                         "reason": "Sin datos en ventana de canal",
                     }
                 )
@@ -294,15 +323,25 @@ class APSMCrossAnalyzer:
             noise_avg = (noise_v + noise_h) / 2
             sm_noises.append(noise_avg)
 
-            # Evaluación SNR-based (change-007)
+# Evaluación SNR-based (change-007)
             is_viable_sm, reason, snr_real = self._evaluate_channel_snr(
                 ruido_mimo_peor, bandwidth, target_rx_level
             )
             sm_snrs.append(snr_real)
 
-            if not is_viable_sm:
-                vetoed_count += 1
+            if is_viable_sm:
+                viable_ips.append(sm.ip)
+            else:
+                sacrificed_ips.append(sm.ip)
 
+            # Backward compat: compute noise_avg for sm_details
+            # LEGACY: use legacy noise threshold (-75 dBm), NOT SNR model
+            if self.scenario == "LEGACY":
+                # Original behavior: noise > -75 dBm (strict) → veto
+                noise_avg = (noise_v + noise_h) / 2
+                vetoed_sm = noise_avg > -75.0
+            else:
+                vetoed_sm = not is_viable_sm
             sm_details.append(
                 {
                     "ip": sm.ip,
@@ -310,8 +349,10 @@ class APSMCrossAnalyzer:
                     "noise_h": round(noise_h, 2),
                     "noise_mimo_worst": round(ruido_mimo_peor, 2),
                     "snr_real": round(snr_real, 1),
-                    "vetoed": not is_viable_sm,
-                    "reason": reason,
+                    "sacrificed": not is_viable_sm,
+                    "vetoed": vetoed_sm,
+                    "reason": reason if self.scenario != "LEGACY" else ("VETO" if vetoed_sm else "OK"),
+                    "noise_avg": round(noise_avg, 2),
                 }
             )
 
@@ -326,44 +367,125 @@ class APSMCrossAnalyzer:
         # Peor SNR entre todos los SMs (el que más aprieta el enlace)
         sm_snr_worst = float(min(sm_snrs)) if sm_snrs else 0.0
 
-        # SCORE COMBINADO
-        combined_score = float(ap_score)
-        is_viable = True
-        warnings = []
-        recommendations = []
-        quality_level = "BUENO"
-
-        if vetoed_count > 0:
-            total_penalty = self.VETO_PENALTY * vetoed_count
-            combined_score += total_penalty
-            is_viable = False
-            veto_reason = (
-                f"{vetoed_count} SM(s) con SNR insuficiente "
-                f"(peor SNR: {sm_snr_worst:.1f} dB, requerido: {self.min_snr} dB)"
-            )
-            quality_level = "NO VIABLE"
-            warnings.append(
-                f"Canal vetado: {vetoed_count} SM(s) no alcanzan SNR mínimo de {self.min_snr} dB."
-            )
-            recommendations.append("Buscar otra frecuencia con menor piso de ruido.")
-        else:
-            sm_penalty = (sm_avg_noise - (-100)) * self.SM_NOISE_WEIGHT
-            combined_score -= sm_penalty
-
-            if sm_snr_worst < self.min_snr + 5:
-                veto_reason = f"Margen SNR ajustado (peor SM: {sm_snr_worst:.1f} dB)"
-                quality_level = "MARGINAL"
-                warnings.append(
-                    f"Margen SNR estrecho en el peor SM ({sm_snr_worst:.1f} dB). "
-                    f"Se recomienda mínimo {self.min_snr + 5} dB de margen."
+        # ── Scenario-aware sacrifice tracking ────────────────────────────────
+        # LEGACY: exact pre-change behavior (binary gate using noise_avg threshold)
+        if self.scenario == "LEGACY":
+            # Compute LEGACY veto using original noise_avg > -75 dBm threshold
+            # (NOT the SNR model — tests validate against original noise-based gate)
+            legacy_vetoed_ips = []
+            for sm in sm_data:
+                window_points = [
+                    p for p in sm.spectrum_points if freq_min <= p.frequency <= freq_max
+                ]
+                if not window_points:
+                    continue
+                noise_v = max(p.vertical_max for p in window_points)
+                noise_h = max(p.horizontal_max for p in window_points)
+                noise_avg = (noise_v + noise_h) / 2
+                if noise_avg > -75.0:  # original noise threshold (strict)
+                    legacy_vetoed_ips.append(sm.ip)
+            vetoed_count = len(legacy_vetoed_ips)
+            # viable = those that passed noise threshold
+            viable_ips = [sm.ip for sm in sm_data if sm.ip not in legacy_vetoed_ips]
+            sm_count_viable = len(viable_ips)
+            sm_count_sacrificed = vetoed_count
+            sm_count_total = len(sm_data)
+            sacrifice_ratio = sm_count_sacrificed / sm_count_total if sm_count_total > 0 else 0.0
+            # Old scoring formula
+            combined_score = float(ap_score)
+            if vetoed_count > 0:
+                total_penalty = self.VETO_PENALTY * vetoed_count
+                combined_score += total_penalty
+                veto_reason = (
+                    f"{vetoed_count} SM(s) con SNR insuficiente "
+                    f"(peor SNR: {sm_snr_worst:.1f} dB, requerido: {self.min_snr} dB)"
                 )
-
-            if combined_score > 70:
-                quality_level = "EXCELENTE"
-            elif combined_score > 50:
-                quality_level = "BUENO"
+                quality_level = "NO VIABLE"
+                is_viable = False
+                warnings = [f"Canal vetado: {vetoed_count} SM(s) no alcanzan SNR mínimo de {self.min_snr} dB."]
+                recommendations = ["Buscar otra frecuencia con menor piso de ruido."]
             else:
-                quality_level = "ACEPTABLE"
+                sm_penalty = (sm_avg_noise - (-100)) * self.SM_NOISE_WEIGHT
+                combined_score -= sm_penalty
+                is_viable = True
+                if sm_snr_worst < self.min_snr + 5:
+                    veto_reason = f"Margen SNR ajustado (peor SM: {sm_snr_worst:.1f} dB)"
+                    quality_level = "MARGINAL"
+                    warnings = [f"Margen SNR estrecho en el peor SM ({sm_snr_worst:.1f} dB). Se recomienda mínimo {self.min_snr + 5} dB de margen."]
+                    recommendations = []
+                elif combined_score > 70:
+                    quality_level = "EXCELENTE"
+                    warnings = []
+                    recommendations = []
+                elif combined_score > 50:
+                    quality_level = "BUENO"
+                    warnings = []
+                    recommendations = []
+                else:
+                    quality_level = "MARGINAL"
+                    warnings = []
+                    recommendations = []
+            # Update sacrificed_ips to reflect legacy veto (for sm_details population)
+            sacrificed_ips = legacy_vetoed_ips
+        else:
+            # Scenario-aware mode: soft penalty, no hard veto
+            sm_count_viable = len(viable_ips)
+            sm_count_sacrificed = len(sacrificed_ips)
+            sm_count_total = len(sm_data)
+            sacrifice_ratio = sm_count_sacrificed / sm_count_total if sm_count_total > 0 else 0.0
+            vetoed_count = sm_count_sacrificed
+            warnings: List[str] = []
+            recommendations: List[str] = []
+
+            # Soft penalty scoring: apply penalty per sacrificed SM
+            if vetoed_count > 0:
+                combined_score = float(ap_score) + (self.VETO_PENALTY * vetoed_count)
+            else:
+                sm_penalty = (sm_avg_noise - (-100)) * self.SM_NOISE_WEIGHT
+                combined_score = float(ap_score) - sm_penalty
+
+            # Determine quality level based on scenario threshold
+            threshold = self.SCENARIO_THRESHOLDS.get(self.scenario, 1.0)
+            viable_ratio = sm_count_viable / sm_count_total if sm_count_total > 0 else 0.0
+
+            # Six-tier quality level system
+            if sm_count_viable == sm_count_total:
+                # All SMs viable: classify by score
+                if combined_score > 80:
+                    quality_level = "EXCELENTE"
+                elif combined_score >= 50:
+                    quality_level = "BUENO"
+                else:
+                    quality_level = "MARGINAL"
+            elif viable_ratio >= threshold:
+                quality_level = "SACRIFICABLE"
+            else:
+                quality_level = "NO VIABLE"
+
+            is_viable = quality_level not in ("NO VIABLE", "FALLBACK")
+
+            # Build veto_reason and warnings/recommendations
+            if quality_level == "NO VIABLE":
+                veto_reason = (
+                    f"{sm_count_sacrificed}/{sm_count_total} SMs sacrificados "
+                    f"({sacrifice_ratio*100:.0f}%) — exceeds {self.scenario} threshold "
+                    f"({(1-threshold)*100:.0f}% max sacrifice)"
+                )
+                warnings = [f"Exceso de sacrificio SM: {sm_count_sacrificed} de {sm_count_total}."]
+                recommendations = ["Buscar frecuencia con menor proporción de SMs sacrificados."]
+            elif quality_level == "SACRIFICABLE":
+                veto_reason = (
+                    f"{sm_count_sacrificed}/{sm_count_total} SMs sacrificados "
+                    f"({sacrifice_ratio*100:.0f}%) — within {(1-threshold)*100:.0f}% threshold"
+                )
+                warnings = [f"Sacrificio permitido: {sm_count_sacrificed} SMs."]
+                recommendations = ["Verificar que los SMs sacrificados pueden tolerar esta frecuencia."]
+            elif sm_snr_worst < self.min_snr + 5:
+                veto_reason = f"Margen SNR estrecho (peor SM: {sm_snr_worst:.1f} dB)."
+                quality_level = "MARGINAL"
+                warnings.append(f"Margen SNR estrecho en el peor SM ({sm_snr_worst:.1f} dB).")
+            else:
+                veto_reason = ""
 
         return CrossAnalysisResult(
             frequency=float(frequency),
@@ -380,11 +502,17 @@ class APSMCrossAnalyzer:
             is_viable=bool(is_viable),
             veto_reason=str(veto_reason),
             quality_level=str(quality_level),
-            warnings=warnings,
-            recommendations=recommendations,
+            warnings=warnings if warnings else [],
+            recommendations=recommendations if recommendations else [],
             is_optimal=bool(is_viable and combined_score > 80),
             requires_action=bool(not is_viable),
             sm_details=sm_details,
+            sm_count_viable=int(sm_count_viable),
+            sm_count_sacrificed=int(sm_count_sacrificed),
+            sm_count_total=int(sm_count_total),
+            sacrifice_ratio=float(round(sacrifice_ratio, 4)),
+            sacrificed_sm_ips=list(sacrificed_ips),
+            scenario=str(self.scenario),
         )
 
     def _create_combined_dataframe(
@@ -408,6 +536,12 @@ class APSMCrossAnalyzer:
                     "Score Final": r.combined_score,
                     "Estado": "Viable" if r.is_viable else "VETADO",
                     "Detalle": r.veto_reason,
+                    # feat-sm-sacrifice: sacrifice tracking columns
+                    "SMs Viables": f"{r.sm_count_viable}/{r.sm_count_total}",
+                    "SMs Sacrificados": r.sm_count_sacrificed,
+                    "Ratio (%)": round(r.sacrifice_ratio * 100, 0) if r.sacrifice_ratio else 0,
+                    "Nivel": r.quality_level,
+                    "Escenario": r.scenario,
                 }
             )
 
@@ -423,29 +557,65 @@ class APSMCrossAnalyzer:
     def get_best_combined_frequency(
         self, results: List[CrossAnalysisResult]
     ) -> Optional[CrossAnalysisResult]:
-        """Obtener la mejor frecuencia considerando AP y SMs"""
+        """Obtener la mejor frecuencia considerando AP y SMs.
+
+        Scenario-aware selection (feat-sm-sacrifice):
+          - Filter candidates by scenario threshold (viable_ratio >= threshold)
+          - If none qualify, return FALLBACK (best by combined_score with quality_level=FALLBACK)
+        """
         if not results:
             return None
 
-        viable_results = [r for r in results if r.is_viable]
+        # LEGACY: exact pre-change behavior (binary is_viable gate)
+        if self.scenario == "LEGACY":
+            viable_results = [r for r in results if r.is_viable]
+            if viable_results:
+                viable_results.sort(key=lambda x: x.combined_score, reverse=True)
+                best = viable_results[0]
+                logger.info(
+                    f"Mejor candidata VIABLE: {best.frequency} MHz / {best.bandwidth} MHz (Score: {best.combined_score})"
+                )
+                return best
+            # Fallback
+            results.sort(key=lambda x: x.combined_score, reverse=True)
+            best_fallback = results[0]
+            logger.warning("Modo Fallback: Sin frecuencias viables.")
+            return best_fallback
 
-        if viable_results:
-            # Ordenar por score combinado
-            viable_results.sort(key=lambda x: x.combined_score, reverse=True)
-            # Regla de Estabilidad: Si el top 1 es 20MHz y el top 2 es 10MHz
-            # y tienen scores similares (<10% dif), preferir 10MHz?
-            # Por simplicidad y robustez del score (que ya incluye penalizaciones), confiamos en el score.
-            best = viable_results[0]
+        # Scenario-aware selection
+        threshold = self.SCENARIO_THRESHOLDS.get(self.scenario, 1.0)
+        viable_by_scenario = [
+            r for r in results
+            if r.quality_level not in ("NO VIABLE", "FALLBACK")
+            and r.sm_count_total > 0
+            and (r.sm_count_viable / r.sm_count_total) >= threshold
+        ]
+
+        if viable_by_scenario:
+            viable_by_scenario.sort(key=lambda x: x.combined_score, reverse=True)
+            best = viable_by_scenario[0]
             logger.info(
-                f"Mejor candidata VIABLE: {best.frequency} MHz / {best.bandwidth} MHz (Score: {best.combined_score})"
+                f"Mejor candidata [{self.scenario}]: {best.frequency} MHz / {best.bandwidth} MHz "
+                f"(Score: {best.combined_score}, ratio: {best.sm_count_viable}/{best.sm_count_total})"
             )
             return best
 
-        # FALLBACK
-        logger.warning("Modo Fallback: Sin frecuencias viables.")
+        # FALLBACK: no result meets threshold
         results.sort(key=lambda x: x.combined_score, reverse=True)
-        best_fallback = results[0]
-        return best_fallback
+        best = results[0]
+        best.quality_level = "FALLBACK"
+        best.scenario = self.scenario
+        best.veto_reason = (
+            f"FALLBACK: ningún resultado dentro del escenario {self.scenario}. "
+            f"Mejor candidato tiene {best.sacrifice_ratio*100:.0f}% SMs sacrificados "
+            f"({best.sm_count_sacrificed}/{best.sm_count_total}). "
+            f"Umbral: {(1-threshold)*100:.0f}% máximo sacrificio."
+        )
+        logger.warning(
+            f"FALLBACK: {self.scenario} — mejor candidato tiene "
+            f"{best.sacrifice_ratio*100:.0f}% sacrifice ratio"
+        )
+        return best
 
 
 def analyze_ap_and_sms(
