@@ -259,6 +259,8 @@ async function startScan() {
             target_rx_level: parseFloat(elements.targetRxLevel ? elements.targetRxLevel.value : '-52'),
             channel_width: channelWidth,
             min_snr: parseFloat(elements.minSnr ? elements.minSnr.value : '18'),
+            scenario: elements.scenarioSelect ? elements.scenarioSelect.value : 'LEGACY',
+            priority: elements.prioritySelect ? elements.prioritySelect.value : 'uplink',
         }
     };
 
@@ -715,14 +717,6 @@ function renderAPCard(ip, analysis) {
         </div>
     </div>`;
 }
-
-function renderErrorCard(ip, error) {
-    return `<div class="ap-result-card" style="border-color:rgba(239,68,68,0.35);">
-        <div class="arc-header"><div class="arc-ip" style="color:var(--accent-red);"><i class="bi bi-x-circle"></i> \</div></div>
-        <div class="arc-body"><div class="scan-alert error">\</div></div>
-    </div>`;
- }
-
 
 function renderErrorCard(ip, error) {
     return `
