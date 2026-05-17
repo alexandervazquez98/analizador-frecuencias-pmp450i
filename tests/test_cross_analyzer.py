@@ -12,6 +12,7 @@ Umbrales clave:
 
 from app.frequency_analyzer import SpectrumPoint
 from app.cross_analyzer import APSMCrossAnalyzer, SMSpectrumData
+import pytest
 
 
 # ===========================================================================
@@ -556,3 +557,139 @@ class TestBandFilter:
                 f"Candidato fuera de banda 3GHz: {r.frequency} MHz — "
                 f"el filtro band_3ghz_max=3987 no fue aplicado por el cross analyzer"
             )
+
+
+# ===========================================================================
+# Scenario Tiers (feat-sm-sacrifice)
+# ===========================================================================
+
+
+class TestScenarioTiers:
+    """Scenario-based SM sacrifice: 6-tier quality level system."""
+
+    def test_legacy_scenario_binary_veto(self):
+        """
+        GIVEN 3 SMs: one clean, one vetoed (noise=-70), one borderline
+        WHEN scenario=LEGACY and noise_avg > -75 threshold
+        THEN sm_count_vetoed = 1, is_viable = False
+        """
+        ap_spectrum = make_ap_spectrum()
+        sms = [
+            make_sm_data("10.0.0.1", v_max=-90.0, h_max=-90.0),  # clean
+            make_sm_data("10.0.0.2", v_max=-70.0, h_max=-70.0),  # veto
+            make_sm_data("10.0.0.3", v_max=-80.0, h_max=-80.0),  # borderline
+        ]
+        analyzer = APSMCrossAnalyzer(config={"scenario": "LEGACY"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=1, bandwidth=20)
+        best = results[0]
+        assert best.sm_count_vetoed == 1
+        assert best.is_viable is False
+        assert best.scenario == "LEGACY"
+
+    def test_cctv_within_threshold_sacrificable(self):
+        """
+        GIVEN 10 SMs, 2 vetoed (sacrifice_ratio=0.20), scenario=CCTV (20% max)
+        WHEN analyzed
+        THEN quality_level = SACRIFICABLE (within 20% threshold)
+        """
+        ap_spectrum = make_ap_spectrum(v_max=-90.0, h_max=-90.0)
+        # 8 clean + 2 noisy (vetoed by SNR model)
+        sms = [make_sm_data(f"10.0.0.{i}", v_max=-95.0, h_max=-95.0) for i in range(8)]
+        sms.extend([make_sm_data(f"10.0.0.{i}", v_max=-60.0, h_max=-60.0) for i in range(8, 10)])
+        analyzer = APSMCrossAnalyzer(config={"scenario": "CCTV"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=1, bandwidth=20)
+        best = results[0]
+        assert best.sm_count_viable == 8
+        assert best.sm_count_sacrificed == 2
+        assert best.sacrifice_ratio == 0.2
+        assert best.quality_level == "SACRIFICABLE"
+        assert best.is_viable is True
+
+    def test_cctv_exceeds_threshold_no_viable(self):
+        """
+        GIVEN 10 SMs, 4 vetoed (sacrifice_ratio=0.40), scenario=CCTV (20% max)
+        WHEN analyzed
+        THEN quality_level = NO VIABLE
+        """
+        ap_spectrum = make_ap_spectrum(v_max=-90.0, h_max=-90.0)
+        sms = [make_sm_data(f"10.0.0.{i}", v_max=-95.0, h_max=-95.0) for i in range(6)]
+        sms.extend([make_sm_data(f"10.0.0.{i}", v_max=-60.0, h_max=-60.0) for i in range(6, 10)])
+        analyzer = APSMCrossAnalyzer(config={"scenario": "CCTV"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=1, bandwidth=20)
+        best = results[0]
+        assert best.sacrifice_ratio == 0.4
+        assert best.quality_level == "NO VIABLE"
+        assert best.is_viable is False
+
+    def test_all_sms_viable_excellent(self):
+        """
+        GIVEN all 8 SMs clean, scenario=BALANCED
+        WHEN analyzed with high combined_score
+        THEN quality_level = EXCELENTE
+        """
+        ap_spectrum = make_ap_spectrum(v_max=-95.0, h_max=-95.0)
+        sms = [make_sm_data(f"10.0.0.{i}", v_max=-95.0, h_max=-95.0) for i in range(8)]
+        analyzer = APSMCrossAnalyzer(config={"scenario": "BALANCED"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=1, bandwidth=20)
+        best = results[0]
+        assert best.sm_count_viable == 8
+        assert best.sm_count_sacrificed == 0
+        assert best.sm_count_total == 8
+        assert best.quality_level == "EXCELENTE"
+
+    def test_soft_penalty_scoring(self):
+        """
+        GIVEN 8 SMs, 2 vetoed, scenario=BALANCED
+        WHEN combined_score is calculated
+        THEN combined_score = ap_score + (VETO_PENALTY * 2) = ap_score - 100
+        """
+        ap_spectrum = make_ap_spectrum(v_max=-90.0, h_max=-90.0)
+        sms = [make_sm_data(f"10.0.0.{i}", v_max=-95.0, h_max=-95.0) for i in range(6)]
+        sms.extend([make_sm_data(f"10.0.0.{i}", v_max=-60.0, h_max=-60.0) for i in range(6, 8)])
+        analyzer = APSMCrossAnalyzer(config={"scenario": "BALANCED"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=1, bandwidth=20)
+        best = results[0]
+        # combined_score = ap_score + (-50 * 2) = ap_score - 100
+        assert best.combined_score == pytest.approx(best.ap_score - 100, abs=5)
+        assert best.sm_count_sacrificed == 2
+
+    def test_fallback_when_all_exceed_threshold(self):
+        """
+        GIVEN all SMs vetoed (sacrifice_ratio=1.0), scenario=CCTV
+        WHEN get_best_combined_frequency is called
+        THEN returns FALLBACK result with quality_level=FALLBACK
+        """
+        ap_spectrum = make_ap_spectrum(v_max=-90.0, h_max=-90.0)
+        sms = [make_sm_data(f"10.0.0.{i}", v_max=-60.0, h_max=-60.0) for i in range(4)]
+        analyzer = APSMCrossAnalyzer(config={"scenario": "CCTV"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, sms, top_n=3, bandwidth=20)
+        best = analyzer.get_best_combined_frequency(results)
+        assert best is not None
+        assert best.quality_level == "FALLBACK"
+        assert "FALLBACK" in best.veto_reason
+
+    def test_scenario_field_in_result(self):
+        """
+        GIVEN scenario=CCTV
+        WHEN analysis runs
+        THEN CrossAnalysisResult has scenario=CCTV
+        """
+        ap_spectrum = make_ap_spectrum()
+        sm = make_sm_data("10.0.0.1", v_max=-95.0, h_max=-95.0)
+        analyzer = APSMCrossAnalyzer(config={"scenario": "CCTV"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, [sm], top_n=1, bandwidth=20)
+        assert results[0].scenario == "CCTV"
+
+    def test_legacy_scenario_exact_threshold_no_veto(self):
+        """
+        GIVEN SM with noise exactly -75 dBm, scenario=LEGACY
+        WHEN noise_avg = -75.0 (not > -75.0)
+        THEN sm_count_vetoed = 0 (strict inequality)
+        """
+        ap_spectrum = make_ap_spectrum()
+        sm = make_sm_data("10.0.0.1", v_max=-75.0, h_max=-75.0)
+        analyzer = APSMCrossAnalyzer(config={"scenario": "LEGACY"})
+        _, results = analyzer.analyze_ap_with_sms(ap_spectrum, [sm], top_n=1, bandwidth=20)
+        best = results[0]
+        assert best.sm_count_vetoed == 0
+        assert best.is_viable is True

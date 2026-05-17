@@ -346,7 +346,18 @@ class ScanTask:
                 # ANALISIS CRUZADO AP-SM
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
-                band_config = {"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+                band_config = {
+                    "band_3ghz_min": 3300,
+                    "band_3ghz_max": 3987,
+                    # feat-sm-sacrifice: scenario-aware sacrifice configuration
+                    "scenario": self.config.get("scenario", "LEGACY"),
+                    "priority": self.config.get("priority", "uplink"),
+                    "override_sm_ips": self.config.get("override_sm_ips", []),
+                }
+                # feat-sm-sacrifice: wire the feature flag — disable sacrifice logic when flag is off
+                from app import SM_SACRIFICE_ENABLED
+                if not SM_SACRIFICE_ENABLED:
+                    band_config["scenario"] = "LEGACY"
                 cross_analyzer = APSMCrossAnalyzer(min_snr=min_snr, config=band_config)
                 freq_analyzer = FrequencyAnalyzer(config=band_config)
 
@@ -545,6 +556,13 @@ class ScanTask:
                                 "is_optimal": best_combined.is_optimal,
                                 "requires_action": best_combined.requires_action,
                                 "sm_details": best_combined.sm_details,
+                                # feat-sm-sacrifice: sacrifice tracking fields
+                                "sm_count_viable": best_combined.sm_count_viable,
+                                "sm_count_sacrificed": best_combined.sm_count_sacrificed,
+                                "sm_count_total": best_combined.sm_count_total,
+                                "sacrifice_ratio": best_combined.sacrifice_ratio,
+                                "sacrificed_sm_ips": best_combined.sacrificed_sm_ips,
+                                "scenario": best_combined.scenario,
                             }
                             if best_combined
                             else None,
@@ -555,6 +573,12 @@ class ScanTask:
                                     "combined_score": r.combined_score,
                                     "sm_worst_noise": r.sm_worst_noise,
                                     "is_viable": r.is_viable,
+                                    "quality_level": r.quality_level,
+                                    "sm_count_viable": r.sm_count_viable,
+                                    "sm_count_sacrificed": r.sm_count_sacrificed,
+                                    "sm_count_total": r.sm_count_total,
+                                    "sacrifice_ratio": r.sacrifice_ratio,
+                                    "sacrificed_sm_ips": r.sacrificed_sm_ips,
                                     "sm_details": r.sm_details,
                                 }
                                 for r in cross_results
