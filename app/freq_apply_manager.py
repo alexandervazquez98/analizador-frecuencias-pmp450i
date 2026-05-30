@@ -74,7 +74,7 @@ class FrequencyApplyManager:
         self,
         scan_id: str,
         freq_mhz: float,
-        tower_id: str,
+        tower_id: Optional[str],
         applied_by: str,
         channel_width_mhz: Optional[float] = None,
         force: bool = False,
@@ -84,7 +84,7 @@ class FrequencyApplyManager:
         Args:
             scan_id:          ID of the completed scan to apply frequency from.
             freq_mhz:         Target frequency in MHz (e.g. 3554.0).
-            tower_id:         Tower identifier (FK towers.tower_id).
+            tower_id:         Optional tower identifier (FK towers.tower_id) for audit/history context.
             applied_by:       Username of the operator or 'system' for auto-apply.
             channel_width_mhz: Channel width in MHz. Stored but SET deferred (v2).
             force:            If True, bypass viability check (admin only at route layer).
@@ -175,7 +175,7 @@ class FrequencyApplyManager:
     def _apply(
         self,
         scan_id: str,
-        tower_id: str,
+        tower_id: Optional[str],
         ap_ip: str,
         sm_ips: List[str],
         freq_khz: int,
@@ -716,7 +716,7 @@ class FrequencyApplyManager:
         self,
         apply_id: int,
         scan_id: str,
-        tower_id: str,
+        tower_id: Optional[str],
         freq_khz: int,
         applied_by: str,
         final_state: str,

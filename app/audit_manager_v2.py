@@ -116,10 +116,10 @@ class AuditManagerV2:
     def end_transaction(
         self,
         result_summary: str,
-        scan_id: str = None,
-        tower_id: str = None,
-        devices: list = None,
-        details: dict = None,
+        scan_id: Optional[str] = None,
+        tower_id: Optional[str] = None,
+        devices: Optional[list[Any]] = None,
+        details: Optional[dict[str, Any]] = None,
     ) -> int:
         """Finaliza la transacción y persiste en audit_logs.
 
@@ -158,10 +158,10 @@ class AuditManagerV2:
     def log_action(
         self,
         result_summary: str,
-        scan_id: str = None,
-        tower_id: str = None,
-        devices: list = None,
-        details: dict = None,
+        scan_id: Optional[str] = None,
+        tower_id: Optional[str] = None,
+        devices: Optional[list[Any]] = None,
+        details: Optional[dict[str, Any]] = None,
     ) -> int:
         """Registrar acción atómica: start + end en un solo llamado.
 
@@ -242,8 +242,8 @@ class AuditManagerV2:
         db_manager,
         limit: int = 100,
         offset: int = 0,
-        username: str = None,
-        action_type: str = None,
+        username: Optional[str] = None,
+        action_type: Optional[str] = None,
     ) -> list:
         """Obtener logs de auditoría con filtros opcionales.
 

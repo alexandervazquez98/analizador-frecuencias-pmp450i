@@ -93,13 +93,13 @@ def apply_frequency():
     Body JSON:
         scan_id (str, required)         — completed scan to use as source
         freq_mhz (float, required)      — target frequency in MHz
-        tower_id (str, required)        — tower identifier
+        tower_id (str, optional)        — tower identifier for audit/history context
         channel_width_mhz (float, opt) — channel width in MHz (SET on SMs + AP)
         force (bool, opt, default false)— bypass viability check (admin only)
 
     Returns:
         200: {success, apply_id, state, freq_khz, sm_results, ap_result, errors}
-        400: {error} — missing or invalid fields
+        400: {error} — missing required fields or invalid values
         403: {error} — viewer role or non-admin requesting force
         422: {error} — viability gate blocked apply
         500: {error} — unexpected server error

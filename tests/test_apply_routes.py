@@ -114,13 +114,21 @@ class TestApplyFrequencyEndpoint:
         )
         assert res.status_code == 400
 
-    def test_returns_400_when_tower_id_missing(self, auth_client):
-        """GIVEN body without tower_id THEN returns 400."""
-        res = auth_client.post(
-            "/api/apply-frequency",
-            json={"scan_id": "SCAN-1", "freq_mhz": 5180.0},
-        )
-        assert res.status_code == 400
+    def test_accepts_missing_tower_id_as_optional_audit_field(self, auth_client):
+        """GIVEN body without tower_id THEN apply proceeds with tower_id=None."""
+        _insert_scan(auth_client, "SCAN-1", ["192.168.1.10"])
+        with patch(
+            "app.routes.apply_routes.FrequencyApplyManager.run_apply",
+            return_value=MOCK_APPLY_RESULT,
+        ) as mock_run_apply:
+            res = auth_client.post(
+                "/api/apply-frequency",
+                json={"scan_id": "SCAN-1", "freq_mhz": 5180.0},
+            )
+
+        assert res.status_code == 200
+        mock_run_apply.assert_called_once()
+        assert mock_run_apply.call_args.kwargs["tower_id"] is None
 
     def test_returns_400_when_freq_mhz_not_numeric(self, auth_client):
         """GIVEN freq_mhz='abc' THEN returns 400."""
