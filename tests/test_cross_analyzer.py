@@ -511,11 +511,11 @@ class TestMultibandAnalysis:
 class TestBandFilter:
     """Regresión: APSMCrossAnalyzer debe respetar el filtro de banda 3GHz."""
 
-    def test_3ghz_band_filter_excludes_4ghz_candidates(self):
+    def test_3ghz_band_filter_excludes_unsupported_candidates_above_3900(self):
         """
         GIVEN un AP de 3 GHz con espectro que incluye puntos en 4000+ MHz
-        WHEN se analiza con config band_3ghz_min=3300 band_3ghz_max=3987
-        THEN ningún candidato recomendado supera 3987 MHz.
+        WHEN se analiza con config band_3ghz_min=3300 band_3ghz_max=3900
+        THEN ningún candidato recomendado supera 3900 MHz.
 
         Regresión: bug donde APSMCrossAnalyzer creaba FrequencyAnalyzer() sin config,
         ignorando el filtro de banda y generando candidatos en 4100+ MHz para equipos 3GHz.
@@ -544,7 +544,7 @@ class TestBandFilter:
         ]
 
         analyzer = APSMCrossAnalyzer(
-            config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
+            config={"band_3ghz_min": 3300, "band_3ghz_max": 3900}
         )
         sm_data = [SMSpectrumData(ip="10.0.0.1", spectrum_points=sm_spectrum)]
 
@@ -553,10 +553,53 @@ class TestBandFilter:
         )
 
         for r in results:
-            assert r.frequency <= 3987.0, (
+            assert r.frequency <= 3900.0, (
                 f"Candidato fuera de banda 3GHz: {r.frequency} MHz — "
-                f"el filtro band_3ghz_max=3987 no fue aplicado por el cross analyzer"
+                f"el filtro band_3ghz_max=3900 no fue aplicado por el cross analyzer"
             )
+
+    def test_3ghz_band_filter_is_channel_edge_aware(self):
+        """
+        GIVEN a 3 GHz band profile capped at 3900 MHz
+        WHEN 20 MHz channels are evaluated near the upper edge
+        THEN 3890/20 is allowed but 3895/20 is excluded because it reaches 3905 MHz.
+        """
+        ap_spectrum = [
+            SpectrumPoint(
+                frequency=3300.0 + i * 5.0,
+                vertical_max=-90.0,
+                vertical_mean=-95.0,
+                horizontal_max=-90.0,
+                horizontal_mean=-95.0,
+            )
+            for i in range(121)  # 3300..3900 MHz
+        ]
+        sm_spectrum = [
+            SpectrumPoint(
+                frequency=3300.0 + i * 5.0,
+                vertical_max=-90.0,
+                vertical_mean=-95.0,
+                horizontal_max=-90.0,
+                horizontal_mean=-95.0,
+            )
+            for i in range(121)
+        ]
+
+        analyzer = APSMCrossAnalyzer(
+            config={"band_3ghz_min": 3300, "band_3ghz_max": 3900}
+        )
+        sm_data = [SMSpectrumData(ip="10.0.0.1", spectrum_points=sm_spectrum)]
+
+        df, results = analyzer.analyze_ap_with_sms(
+            ap_spectrum, sm_data, top_n=500, bandwidth=20
+        )
+
+        frequencies = {r.frequency for r in results}
+        assert 3890.0 in frequencies
+        assert 3895.0 not in frequencies
+        assert all(r.frequency + (r.bandwidth / 2) <= 3900.0 for r in results)
+        assert "Canal Alto (MHz)" in df.columns
+        assert df["Canal Alto (MHz)"].max() <= 3900.0
 
 
 # ===========================================================================

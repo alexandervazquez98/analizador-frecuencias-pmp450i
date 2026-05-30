@@ -113,9 +113,11 @@ class FrequencyAnalyzer:
     SLIDING_STEP = 1.25  # MHz — default para banda 3 GHz
     SLIDING_STEP_5GHZ = 2.5  # MHz — obligatorio para banda 5 GHz
 
-    # Rangos de banda PMP450i - 3GHz: 3300-3987 MHz
+    # Rangos de banda PMP450i - 3GHz: 3300-3900 MHz.
+    # El límite es edge-aware: un canal debe entrar completo dentro de la banda,
+    # no alcanza con que la frecuencia central sea <= BAND_3GHZ_MAX.
     BAND_3GHZ_MIN = 3300  # MHz - Límite inferior banda 3GHz
-    BAND_3GHZ_MAX = 3987  # MHz - Límite superior banda 3GHz
+    BAND_3GHZ_MAX = 3900  # MHz - Límite superior banda 3GHz
 
     # Bonificaciones por Eficiencia Espectral
     # Lógica: preferir el menor BW que cumpla la demanda del sector.
@@ -684,6 +686,10 @@ class FrequencyAnalyzer:
                 {
                     "Frecuencia Central (MHz)": score.center_freq,
                     "Ancho Banda (MHz)": score.bandwidth,
+                    "Canal Bajo (MHz)": round(center - (width / 2), 3),
+                    "Canal Alto (MHz)": round(center + (width / 2), 3),
+                    "Banda Min (MHz)": self.band_3ghz_min,
+                    "Banda Max (MHz)": self.band_3ghz_max,
                     "Ruido V (dBm)": round(score.noise_vertical, 2),
                     "Ruido H (dBm)": round(score.noise_horizontal, 2),
                     "Ruido Promedio (dBm)": round(score.noise_avg, 2),

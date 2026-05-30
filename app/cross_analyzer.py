@@ -526,6 +526,10 @@ class APSMCrossAnalyzer:
                 {
                     "Frecuencia (MHz)": r.frequency,
                     "Ancho (MHz)": r.bandwidth,
+                    "Canal Bajo (MHz)": round(r.frequency - (r.bandwidth / 2), 3),
+                    "Canal Alto (MHz)": round(r.frequency + (r.bandwidth / 2), 3),
+                    "Banda Min (MHz)": self.analyzer.band_3ghz_min,
+                    "Banda Max (MHz)": self.analyzer.band_3ghz_max,
                     "Score AP": r.ap_score,
                     "Throughput Est. (Mbps)": r.throughput_est,
                     "Ruido AP (dBm)": round(r.ap_noise_avg, 2),
@@ -631,7 +635,7 @@ def analyze_ap_and_sms(
 
     Args:
         band_3ghz_min: Límite inferior banda 3GHz en MHz (default 3300).
-        band_3ghz_max: Límite superior banda 3GHz en MHz (default 3987).
+        band_3ghz_max: Límite superior banda 3GHz en MHz (default 3900).
     """
     band_config = {"band_3ghz_min": band_3ghz_min, "band_3ghz_max": band_3ghz_max}
     analyzer = APSMCrossAnalyzer(config=band_config)

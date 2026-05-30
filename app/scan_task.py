@@ -347,8 +347,12 @@ class ScanTask:
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
                 band_config = {
-                    "band_3ghz_min": 3300,
-                    "band_3ghz_max": 3987,
+                    "band_3ghz_min": self.config.get(
+                        "band_3ghz_min", FrequencyAnalyzer.BAND_3GHZ_MIN
+                    ),
+                    "band_3ghz_max": self.config.get(
+                        "band_3ghz_max", FrequencyAnalyzer.BAND_3GHZ_MAX
+                    ),
                     # feat-sm-sacrifice: scenario-aware sacrifice configuration
                     "scenario": self.config.get("scenario", "LEGACY"),
                     "priority": self.config.get("priority", "uplink"),
@@ -456,7 +460,11 @@ class ScanTask:
                                 f"solo de AP"
                             )
                             report = await asyncio.to_thread(
-                                analyze_ap, ap_ip, target_rx, 3300, 3987
+                                analyze_ap,
+                                ap_ip,
+                                target_rx,
+                                band_config["band_3ghz_min"],
+                                band_config["band_3ghz_max"],
                             )
                             analysis_results[ap_ip] = report.to_dict()
 
@@ -607,15 +615,25 @@ class ScanTask:
                 # ANALISIS SOLO DE AP (modo original)
                 logger.info(f"[{self.scan_id}] Ejecutando analisis solo de AP...")
 
-                freq_analyzer = FrequencyAnalyzer(
-                    config={"band_3ghz_min": 3300, "band_3ghz_max": 3987}
-                )
+                band_config = {
+                    "band_3ghz_min": self.config.get(
+                        "band_3ghz_min", FrequencyAnalyzer.BAND_3GHZ_MIN
+                    ),
+                    "band_3ghz_max": self.config.get(
+                        "band_3ghz_max", FrequencyAnalyzer.BAND_3GHZ_MAX
+                    ),
+                }
+                freq_analyzer = FrequencyAnalyzer(config=band_config)
 
                 for i, ip in enumerate(completed_aps):
                     logger.info(f"[{self.scan_id}] Analizando AP {ip}...")
 
                     report = await asyncio.to_thread(
-                        analyze_ap, ip, target_rx, 3300, 3987
+                        analyze_ap,
+                        ip,
+                        target_rx,
+                        band_config["band_3ghz_min"],
+                        band_config["band_3ghz_max"],
                     )
                     analysis_results[ip] = report.to_dict()
 
@@ -840,6 +858,9 @@ class ScanTask:
             This method NEVER raises. Any exception is caught, logged, and discarded.
             A failed auto-apply does NOT change the scan's status (it remains 'completed').
         """
+        # This method is only called when storage_manager exists (see run()).
+        assert self.storage_manager is not None
+
         # tower_id is optional — taken from scan config if the scan was started
         # from a tower context. Defaults to None when scan is standalone.
         tower_id = self.config.get("tower_id") or None

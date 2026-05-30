@@ -79,6 +79,28 @@ def make_burst_noise_points(
     ]
 
 
+class Test3GHzBandLimits:
+    """Safe PMP450i 3GHz profile and channel-edge validation."""
+
+    def test_default_3ghz_upper_limit_is_3900(self):
+        assert FrequencyAnalyzer.BAND_3GHZ_MIN == 3300
+        assert FrequencyAnalyzer.BAND_3GHZ_MAX == 3900
+
+    def test_20mhz_candidates_respect_3900_upper_channel_edge(self):
+        points = make_spectrum_points(freq_start=3300.0, freq_step=5.0, count=121)
+        analyzer = FrequencyAnalyzer(
+            config={"band_3ghz_min": 3300, "band_3ghz_max": 3900}
+        )
+
+        df = analyzer.analyze_spectrum(points, bandwidth=20)
+
+        assert not df.empty
+        assert 3890.0 in set(df["Frecuencia Central (MHz)"])
+        assert 3895.0 not in set(df["Frecuencia Central (MHz)"])
+        assert df["Canal Alto (MHz)"].max() <= 3900.0
+        assert df["Banda Max (MHz)"].dropna().eq(3900).all()
+
+
 # ===========================================================================
 # S1-A: Cálculo del Piso de Ruido (Noise Floor)
 # ===========================================================================
