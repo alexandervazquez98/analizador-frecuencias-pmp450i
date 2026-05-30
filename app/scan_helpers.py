@@ -67,4 +67,8 @@ def get_scan_defaults() -> dict:
         # El sistema no recomendará BWs menores a este valor.
         # Operativamente usar 15 MHz como piso (latencia + headroom de capacidad).
         "min_channel_width": int(os.environ.get("MIN_CHANNEL_WIDTH", "15")),
+        # Demanda mínima agregada del sector. 0 = sin gate de capacidad.
+        "min_sector_throughput_mbps": float(
+            os.environ.get("MIN_SECTOR_THROUGHPUT_MBPS", "0")
+        ),
     }

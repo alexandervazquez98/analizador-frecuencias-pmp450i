@@ -499,13 +499,81 @@ class TestMultibandAnalysis:
         expected_cols = [
             "Frecuencia (MHz)",
             "Ancho (MHz)",
+            "Canal Bajo (MHz)",
+            "Canal Alto (MHz)",
             "Score AP",
             "Throughput Est. (Mbps)",
+            "Capacidad Requerida (Mbps)",
+            "Capacidad Estimada (Mbps)",
+            "Margen Capacidad (Mbps)",
+            "Capacidad OK",
             "Score Final",
             "Estado",
         ]
         for col in expected_cols:
             assert col in df.columns, f"Columna faltante: {col}"
+
+    def test_centered_window_evidence_for_ap_and_sm_details(self):
+        """
+        GIVEN a 3010 MHz / 20 MHz candidate
+        THEN AP/SM evidence exposes the analyzed 3000-3020 MHz channel window.
+        """
+        ap_spectrum = make_ap_spectrum(freq_start=3000.0, count=5)
+        sms = [make_sm_data("10.0.0.1", freq_start=3000.0, count=5)]
+
+        analyzer = APSMCrossAnalyzer()
+        df, results = analyzer.analyze_ap_with_sms(
+            ap_spectrum, sms, top_n=1, bandwidth=20
+        )
+
+        best = results[0]
+        assert best.frequency == 3010.0
+        assert df.iloc[0]["Canal Bajo (MHz)"] == 3000.0
+        assert df.iloc[0]["Canal Alto (MHz)"] == 3020.0
+        assert best.sm_details[0]["channel_low_mhz"] == 3000.0
+        assert best.sm_details[0]["channel_high_mhz"] == 3020.0
+
+    def test_capacity_demand_rejects_narrower_clean_channel(self):
+        """
+        GIVEN clean 15/20 MHz candidates but a 55 Mbps sector demand
+        THEN 15 MHz is marked not viable and best selection chooses 20 MHz.
+        """
+        ap_spectrum = make_ap_spectrum(count=30, v_max=-90.0, h_max=-90.0)
+        sms = [make_sm_data("10.0.0.1", count=30, v_max=-90.0, h_max=-90.0)]
+
+        analyzer = APSMCrossAnalyzer(config={"min_sector_throughput_mbps": 55})
+        _, results = analyzer.analyze_multiband_ap_with_sms(
+            ap_spectrum, sms, top_n=1, min_channel_width=15, target_rx_level=-52
+        )
+
+        by_width = {r.bandwidth: r for r in results}
+        assert by_width[15].capacity_ok is False
+        assert by_width[15].is_viable is False
+        assert by_width[20].capacity_ok is True
+        assert by_width[20].is_viable is True
+        best = analyzer.get_best_combined_frequency(results)
+        assert best is not None
+        assert best.bandwidth == 20
+
+    def test_missing_sm_window_fails_capacity_gate(self):
+        """
+        GIVEN AP capacity is high but one SM has no data in the centered window
+        THEN the bottleneck capacity is 0 and demand is not satisfied.
+        """
+        ap_spectrum = make_ap_spectrum(freq_start=5000.0, count=20)
+        sms = [make_sm_data("10.0.0.1", freq_start=6000.0, count=20)]
+
+        analyzer = APSMCrossAnalyzer(config={"min_sector_throughput_mbps": 10})
+        _, results = analyzer.analyze_ap_with_sms(
+            ap_spectrum, sms, top_n=1, bandwidth=20, target_rx_level=-52
+        )
+
+        result = results[0]
+        assert result.capacity_estimated_mbps == 0.0
+        assert result.capacity_ok is False
+        assert result.is_viable is False
+        assert result.sm_details[0]["capacity_estimated_mbps"] == 0.0
+        assert result.sm_details[0]["reason"] == "Sin datos en ventana de canal"
 
 
 class TestBandFilter:

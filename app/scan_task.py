@@ -359,6 +359,9 @@ class ScanTask:
                     "scenario": self.config.get("scenario", "LEGACY"),
                     "priority": self.config.get("priority", "uplink"),
                     "override_sm_ips": self.config.get("override_sm_ips", []),
+                    "min_sector_throughput_mbps": self.config.get(
+                        "min_sector_throughput_mbps", 0
+                    ),
                 }
                 # feat-sm-sacrifice: wire the feature flag — disable sacrifice logic when flag is off
                 from app import SM_SACRIFICE_ENABLED
@@ -573,6 +576,16 @@ class ScanTask:
                                 "sacrifice_ratio": best_combined.sacrifice_ratio,
                                 "sacrificed_sm_ips": best_combined.sacrificed_sm_ips,
                                 "scenario": best_combined.scenario,
+                                "channel_low_mhz": round(
+                                    best_combined.frequency - (best_combined.bandwidth / 2), 3
+                                ),
+                                "channel_high_mhz": round(
+                                    best_combined.frequency + (best_combined.bandwidth / 2), 3
+                                ),
+                                "capacity_required_mbps": best_combined.capacity_required_mbps,
+                                "capacity_estimated_mbps": best_combined.capacity_estimated_mbps,
+                                "capacity_margin_mbps": best_combined.capacity_margin_mbps,
+                                "capacity_ok": best_combined.capacity_ok,
                             }
                             if best_combined
                             else None,
@@ -590,6 +603,13 @@ class ScanTask:
                                     "sacrifice_ratio": r.sacrifice_ratio,
                                     "sacrificed_sm_ips": r.sacrificed_sm_ips,
                                     "sm_details": r.sm_details,
+                                    "bandwidth": r.bandwidth,
+                                    "channel_low_mhz": round(r.frequency - (r.bandwidth / 2), 3),
+                                    "channel_high_mhz": round(r.frequency + (r.bandwidth / 2), 3),
+                                    "capacity_required_mbps": r.capacity_required_mbps,
+                                    "capacity_estimated_mbps": r.capacity_estimated_mbps,
+                                    "capacity_margin_mbps": r.capacity_margin_mbps,
+                                    "capacity_ok": r.capacity_ok,
                                 }
                                 for r in cross_results
                             ],

@@ -173,6 +173,8 @@ def get_config():
             "min_snr": defaults["min_snr"],
             "max_polarization_diff": defaults["max_polarization_diff"],
             "channel_width": defaults["channel_width"],
+            "min_channel_width": defaults["min_channel_width"],
+            "min_sector_throughput_mbps": defaults["min_sector_throughput_mbps"],
         }
     )
 
@@ -215,6 +217,9 @@ def start_scan(audit_manager=None):
         config.setdefault("max_pol_diff", defaults["max_polarization_diff"])
         config.setdefault("channel_width", defaults["channel_width"])
         config.setdefault("min_channel_width", defaults["min_channel_width"])
+        config.setdefault(
+            "min_sector_throughput_mbps", defaults["min_sector_throughput_mbps"]
+        )
         # feat-sm-sacrifice: scenario-aware sacrifice configuration
         config.setdefault("scenario", data.get("config", {}).get("scenario", data.get("scenario", "LEGACY")))
         config.setdefault("priority", data.get("config", {}).get("priority", data.get("priority", "uplink")))

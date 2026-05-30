@@ -60,6 +60,12 @@ class CrossAnalysisResult:
     # Detalles por SM
     sm_details: List[Dict]
 
+    # Capacity-aware scoring (issue #52)
+    capacity_required_mbps: float = 0.0
+    capacity_estimated_mbps: float = 0.0
+    capacity_margin_mbps: float = 0.0
+    capacity_ok: bool = True
+
     # ── SM Sacrifice Tracking (feat-sm-sacrifice) ────────────────────────────
     sm_count_viable: int = 0
     sm_count_sacrificed: int = 0
@@ -97,7 +103,7 @@ class APSMCrossAnalyzer:
         "OVERRIDE": 1.0,  # 100% pass — operator manually marks sacrificable SMs
     }
 
-    def __init__(self, min_snr: float = None, config: Dict = None):
+    def __init__(self, min_snr: Optional[float] = None, config: Optional[Dict] = None):
         self.analyzer = FrequencyAnalyzer(config=config or {})
         self.min_snr = min_snr if min_snr is not None else self.DEFAULT_MIN_SNR
         # feat-sm-sacrifice: scenario configuration
@@ -105,6 +111,39 @@ class APSMCrossAnalyzer:
         self.scenario = self.config.get("scenario", "LEGACY")
         self.priority = self.config.get("priority", "uplink")
         self.override_sm_ips = self.config.get("override_sm_ips", [])
+        self.min_sector_throughput_mbps = float(
+            self.config.get("min_sector_throughput_mbps", 0) or 0
+        )
+
+    def _modulation_from_snr(self, snr: float) -> str:
+        """Map real/estimated SNR to the same modulation labels used by AP scoring."""
+        if snr >= FrequencyAnalyzer.SNR_256QAM:
+            return "256QAM (8X)"
+        if snr >= FrequencyAnalyzer.SNR_64QAM:
+            return "64QAM (6X)"
+        if snr >= FrequencyAnalyzer.SNR_16QAM:
+            return "16QAM (4X)"
+        if snr >= FrequencyAnalyzer.SNR_UNSTABLE:
+            return "QPSK (2X)"
+        return "Inestable"
+
+    def _estimate_capacity(self, modulation: str, bandwidth: int) -> float:
+        """Estimate usable sector capacity for a modulation/bandwidth pair."""
+        spectral_efficiency = {
+            "256QAM": 8.0,
+            "64QAM": 6.0,
+            "16QAM": 4.0,
+            "QPSK": 2.0,
+            "BPSK": 1.0,
+            "Inestable": 0.0,
+            "N/A": 0.0,
+        }
+        efficiency = 0.0
+        for label, value in spectral_efficiency.items():
+            if label in modulation:
+                efficiency = value
+                break
+        return round(bandwidth * efficiency * 0.75, 2)
 
     def _evaluate_channel_snr(
         self,
@@ -285,6 +324,7 @@ class APSMCrossAnalyzer:
         sm_details = []
         sm_noises = []
         sm_snrs = []
+        sm_capacities = []
         viable_ips: List[str] = []
         sacrificed_ips: List[str] = []
         veto_reason = ""
@@ -308,10 +348,15 @@ class APSMCrossAnalyzer:
                         "noise_h": None,
                         "noise_mimo_worst": None,
                         "snr_real": None,
+                        "modulation_estimated": "N/A",
+                        "capacity_estimated_mbps": 0.0,
+                        "channel_low_mhz": round(freq_min, 3),
+                        "channel_high_mhz": round(freq_max, 3),
                         "sacrificed": False,
                         "reason": "Sin datos en ventana de canal",
                     }
                 )
+                sm_capacities.append(0.0)
                 continue
 
             # Peor ruido MIMO: conservador, usa MAX de cada polaridad
@@ -328,6 +373,9 @@ class APSMCrossAnalyzer:
                 ruido_mimo_peor, bandwidth, target_rx_level
             )
             sm_snrs.append(snr_real)
+            sm_modulation = self._modulation_from_snr(snr_real)
+            sm_capacity = self._estimate_capacity(sm_modulation, bandwidth)
+            sm_capacities.append(sm_capacity)
 
             if is_viable_sm:
                 viable_ips.append(sm.ip)
@@ -349,6 +397,10 @@ class APSMCrossAnalyzer:
                     "noise_h": round(noise_h, 2),
                     "noise_mimo_worst": round(ruido_mimo_peor, 2),
                     "snr_real": round(snr_real, 1),
+                    "modulation_estimated": sm_modulation,
+                    "capacity_estimated_mbps": sm_capacity,
+                    "channel_low_mhz": round(freq_min, 3),
+                    "channel_high_mhz": round(freq_max, 3),
                     "sacrificed": not is_viable_sm,
                     "vetoed": vetoed_sm,
                     "reason": reason if self.scenario != "LEGACY" else ("VETO" if vetoed_sm else "OK"),
@@ -366,6 +418,16 @@ class APSMCrossAnalyzer:
 
         # Peor SNR entre todos los SMs (el que más aprieta el enlace)
         sm_snr_worst = float(min(sm_snrs)) if sm_snrs else 0.0
+
+        # Capacity gate: use the conservative AP/SM bottleneck capacity.
+        # AP throughput_est comes from AP window SNR/modulation; SM capacity comes
+        # from the worst real SM SNR over the same centered channel window.
+        capacity_estimated = float(throughput_est)
+        if sm_capacities:
+            capacity_estimated = min(capacity_estimated, float(min(sm_capacities)))
+        capacity_required = self.min_sector_throughput_mbps
+        capacity_margin = capacity_estimated - capacity_required
+        capacity_ok = capacity_required <= 0 or capacity_estimated >= capacity_required
 
         # ── Scenario-aware sacrifice tracking ────────────────────────────────
         # LEGACY: exact pre-change behavior (binary gate using noise_avg threshold)
@@ -487,6 +549,21 @@ class APSMCrossAnalyzer:
             else:
                 veto_reason = ""
 
+        if not capacity_ok:
+            capacity_warning = (
+                f"Capacidad insuficiente: {capacity_estimated:.1f} Mbps estimados "
+                f"< {capacity_required:.1f} Mbps requeridos"
+            )
+            is_viable = False
+            quality_level = "NO VIABLE"
+            combined_score -= min(50.0, abs(capacity_margin))
+            veto_reason = f"{veto_reason}; {capacity_warning}" if veto_reason else capacity_warning
+            warnings = [*warnings, capacity_warning]
+            recommendations = [
+                *recommendations,
+                "Usar un ancho de canal mayor o reducir demanda/carga del sector.",
+            ]
+
         return CrossAnalysisResult(
             frequency=float(frequency),
             bandwidth=int(bandwidth),
@@ -498,6 +575,10 @@ class APSMCrossAnalyzer:
             sm_snr_worst=float(sm_snr_worst),
             sm_count_vetoed=int(vetoed_count),
             throughput_est=float(throughput_est),
+            capacity_required_mbps=float(capacity_required),
+            capacity_estimated_mbps=float(round(capacity_estimated, 2)),
+            capacity_margin_mbps=float(round(capacity_margin, 2)),
+            capacity_ok=bool(capacity_ok),
             combined_score=float(round(combined_score, 2)),
             is_viable=bool(is_viable),
             veto_reason=str(veto_reason),
@@ -532,6 +613,10 @@ class APSMCrossAnalyzer:
                     "Banda Max (MHz)": self.analyzer.band_3ghz_max,
                     "Score AP": r.ap_score,
                     "Throughput Est. (Mbps)": r.throughput_est,
+                    "Capacidad Requerida (Mbps)": r.capacity_required_mbps,
+                    "Capacidad Estimada (Mbps)": r.capacity_estimated_mbps,
+                    "Margen Capacidad (Mbps)": r.capacity_margin_mbps,
+                    "Capacidad OK": "Sí" if r.capacity_ok else "No",
                     "Ruido AP (dBm)": round(r.ap_noise_avg, 2),
                     "SNR Estimado AP (dB)": round(r.ap_snr, 2),
                     "Peor Ruido SMs (dBm)": round(r.sm_worst_noise, 2),
