@@ -527,7 +527,7 @@ function renderInstallationSheet(results) {
     }
 
     // 3. Renderizar vista
-    let poolRows = topCandidates.map(f => {
+    const poolRows = topCandidates.map(f => {
         const throughput = f['Throughput Est. (Mbps)'] || 0;
         // Dual-key support: AP_ONLY usa 'V\u00e1lido'='S\u00ed', AP_SM_CROSS usa 'Estado'='Viable'
         const estadoLabel = f.Estado ?? (f['V\u00e1lido'] === 'S\u00ed' ? 'Viable' : 'No Viable');
@@ -629,7 +629,7 @@ function renderAPCard(ip, analysis) {
     let bestFreqMhz = null, bwMhz = null;
     let qualityClass = 'none', qualityLabel = 'N/A';
     let metricScore = '\u2014', metricNoise = '\u2014', metricThroughput = '\u2014';
-    let metricPoints = analysis.spectrum_points || 0;
+    const metricPoints = analysis.spectrum_points || 0;
     let applyBtn = '';
     const isViewer = (window.userRole === 'viewer');
 
@@ -779,11 +779,19 @@ function updateStatusBadge(status) {
     if (!elements.statusBadge) return;
     const map = {
         'initializing': 'Inicializando...',
+        'validating': 'Validando dispositivos...',
         'discovering': 'Descubriendo SMs...',
         'scanning': 'Escaneando espectro...',
+        'downloading': 'Descargando XML...',
+        'downloading_ap_xml': 'Descargando XML de APs...',
+        'downloading_sm_xml': 'Descargando XML de SMs...',
         'analyzing': 'Analizando frecuencias...',
-        'completed': 'âœ“ Completado',
-        'failed': '\u2713 Error'
+        'analyzing_ap': 'Analizando APs...',
+        'analyzing_sms_cross': 'Analizando AP + SMs...',
+        'saving_results': 'Guardando resultados...',
+        'auto_apply_optional': 'Aplicando recomendación...',
+        'completed': '✓ Completado',
+        'failed': '✗ Error'
     };
     elements.statusBadge.textContent = map[status] || status;
     setStepperState(status);
@@ -791,13 +799,26 @@ function updateStatusBadge(status) {
 
 /**
  * Advance the 5-step stepper UI to reflect the current scan status.
- * Steps: validating(0) â†’ discovering(1) â†’ scanning(2) â†’ analyzing(3) â†’ completed(4)
+ * Detailed backend phases are intentionally grouped into the closest visible step.
+ * Steps: validating(0) → discovering(1) → scanning/downloading(2) → analyzing/saving/apply(3) → completed(4)
  */
 function setStepperState(status) {
     const steps = ['validating', 'discovering', 'scanning', 'analyzing', 'completed'];
     const activeIdx = {
-        'initializing': 0, 'discovering': 1, 'scanning': 2,
-        'analyzing': 3, 'completed': 4, 'failed': 4
+        'initializing': 0,
+        'validating': 0,
+        'discovering': 1,
+        'scanning': 2,
+        'downloading': 2,
+        'downloading_ap_xml': 2,
+        'downloading_sm_xml': 2,
+        'analyzing': 3,
+        'analyzing_ap': 3,
+        'analyzing_sms_cross': 3,
+        'saving_results': 3,
+        'auto_apply_optional': 3,
+        'completed': 4,
+        'failed': 4
     }[status] ?? 0;
 
     steps.forEach((step, idx) => {

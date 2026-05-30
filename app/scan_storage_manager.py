@@ -10,7 +10,7 @@ Specification: change-005 specs § S4.5 — Almacenamiento Persistente de Escane
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,11 @@ class ScanStorageManager:
         sm_ips = (
             _serialize(data.get("sm_ips")) if data.get("sm_ips") is not None else None
         )
-        config = (
-            _serialize(data.get("config")) if data.get("config") is not None else None
-        )
+        config_data = data.get("config")
+        if data.get("progress") is not None:
+            config_data = dict(config_data or {})
+            config_data["progress"] = data.get("progress")
+        config = _serialize(config_data) if config_data is not None else None
         results = (
             _serialize(data.get("results")) if data.get("results") is not None else None
         )
@@ -200,7 +202,7 @@ class ScanStorageManager:
                 "SELECT * FROM scans ORDER BY started_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
-            return [_deserialize_row(row) for row in rows]
+            return [scan for row in rows if (scan := _deserialize_row(row)) is not None]
         finally:
             conn.close()
 
@@ -208,8 +210,8 @@ class ScanStorageManager:
         self,
         scan_id: str,
         status: str,
-        progress: int = None,
-        error: str = None,
+        progress: Optional[int] = None,
+        error: Optional[str] = None,
     ) -> None:
         """Update the status (and optionally progress/error) of an active scan.
 
@@ -256,9 +258,9 @@ class ScanStorageManager:
         self,
         scan_id: str,
         results: dict,
-        duration_seconds: float = None,
-        logs: list = None,
-        sm_ips: list = None,
+        duration_seconds: Optional[float] = None,
+        logs: Optional[list[Any]] = None,
+        sm_ips: Optional[list[str]] = None,
     ) -> None:
         """Mark a scan as completed and persist its results.
 
@@ -280,6 +282,7 @@ class ScanStorageManager:
             "results = ?",
             "completed_at = ?",
             "duration_seconds = ?",
+            "config = json_patch(COALESCE(config, '{}'), json_object('progress', 100))",
         ]
         params = [results_json, now, duration_seconds]
 

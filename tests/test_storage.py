@@ -161,6 +161,20 @@ class TestUpdateScanStatus:
         row = storage.get_scan("s2")
         assert row["error"] == "Connection timeout"
 
+    def test_updates_progress_in_config(self, storage):
+        """GIVEN saved scan WHEN update_scan_status with progress THEN config.progress is persisted."""
+        storage.save_scan("s-progress", _minimal_scan())
+        storage.update_scan_status("s-progress", "downloading_sm_xml", progress=55)
+        row = storage.get_scan("s-progress")
+        assert row["status"] == "downloading_sm_xml"
+        assert row["config"]["progress"] == 55
+
+    def test_save_scan_stores_initial_progress_in_config(self, storage):
+        """GIVEN progress in save payload WHEN saved THEN progress is available in config."""
+        storage.save_scan("s-initial-progress", {**_minimal_scan(), "progress": 7})
+        row = storage.get_scan("s-initial-progress")
+        assert row["config"]["progress"] == 7
+
     def test_does_not_fail_on_unknown_id(self, storage):
         """GIVEN no scan with given id WHEN update_scan_status THEN no exception raised."""
         # Should be a no-op without raising
@@ -197,6 +211,14 @@ class TestCompleteScan:
         storage.complete_scan("c3", {}, duration_seconds=42.5)
         row = storage.get_scan("c3")
         assert abs(row["duration_seconds"] - 42.5) < 0.01
+
+    def test_sets_progress_to_100(self, storage):
+        """GIVEN active scan WHEN complete_scan THEN persisted progress is 100."""
+        storage.save_scan("c-progress", _minimal_scan())
+        storage.update_scan_status("c-progress", "analyzing_ap", progress=75)
+        storage.complete_scan("c-progress", {})
+        row = storage.get_scan("c-progress")
+        assert row["config"]["progress"] == 100
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -363,6 +385,18 @@ class TestHTTPGetResultsFallback:
         data = resp.get_json()
         assert data["status"] == "scanning"
 
+    def test_returns_progress_when_scan_not_completed(self, http_client):
+        """GIVEN persisted progress WHEN results requested early THEN 400 includes progress."""
+        c, ssm = http_client
+        scan_id = "http-res-progress"
+        ssm.save_scan(scan_id, _minimal_scan(scan_id))
+        ssm.update_scan_status(scan_id, "downloading_ap_xml", progress=50)
+        resp = c.get(f"/api/results/{scan_id}")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["status"] == "downloading_ap_xml"
+        assert data["progress"] == 50
+
 
 class TestHTTPGetStatusFallback:
     """HTTP: /api/status/<id> falls back to SQLite when scan not in memory."""
@@ -377,6 +411,19 @@ class TestHTTPGetStatusFallback:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "completed"
+
+    def test_status_returns_persisted_progress_from_db(self, http_client):
+        """GIVEN persisted progress WHEN status falls back to DB THEN progress is returned."""
+        c, ssm = http_client
+        scan_id = "http-stat-progress"
+        ssm.save_scan(scan_id, _minimal_scan(scan_id))
+        ssm.update_scan_status(scan_id, "downloading_sm_xml", progress=55)
+        resp = c.get(f"/api/status/{scan_id}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "downloading_sm_xml"
+        assert data["progress"] == 55
+        assert data["logs"] == []
 
     def test_status_404_when_nowhere(self, http_client):
         """GIVEN scan_id not in memory or DB THEN 404."""
@@ -405,6 +452,22 @@ class TestHTTPListScansMerge:
         ids = [s["scan_id"] for s in data["scans"]]
         assert "list-001" in ids
 
+    def test_db_scan_progress_and_analysis_mode_exposed(self, http_client):
+        """GIVEN DB scan progress/mode WHEN list THEN API exposes both."""
+        c, ssm = http_client
+        scan_id = "list-progress-mode"
+        ssm.save_scan(
+            scan_id,
+            {**_minimal_scan(scan_id), "scan_type": "AP_SM_CROSS"},
+        )
+        ssm.update_scan_status(scan_id, "analyzing_sms_cross", progress=73)
+        resp = c.get("/api/scans")
+        data = resp.get_json()
+        match = next(s for s in data["scans"] if s["scan_id"] == scan_id)
+        assert match["status"] == "analyzing_sms_cross"
+        assert match["progress"] == 73
+        assert match["analysis_mode"] == "AP_SM_CROSS"
+
     def test_dedup_memory_over_db(self, http_client):
         """GIVEN same scan_id in memory AND DB WHEN list THEN appears once (memory wins)."""
         import app.routes.scan_routes as sr
@@ -431,6 +494,7 @@ class TestHTTPListScansMerge:
         assert ids.count(scan_id) == 1
         match = next(s for s in data["scans"] if s["scan_id"] == scan_id)
         assert match["status"] == "scanning"
+        assert match["analysis_mode"] == "AP_ONLY"
 
         sr.active_scans.clear()
 

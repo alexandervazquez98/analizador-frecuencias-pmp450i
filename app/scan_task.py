@@ -215,7 +215,7 @@ class ScanTask:
             )
             scan_results_data = await scanner.start_tower_scan()
 
-            self.progress = 40
+            self._update_status("scanning", progress=40)
             self.log("Fase de escaneo completada. Procesando resultados...")
 
             # Extraer resultados por tipo
@@ -302,7 +302,7 @@ class ScanTask:
             )
 
             # Fase 2: Descargar espectro XML
-            self._update_status("downloading", progress=50)
+            self._update_status("downloading_ap_xml", progress=50)
             self.log("Descargando archivos de espectro XML...")
 
             ap_xmls = {}
@@ -315,6 +315,8 @@ class ScanTask:
                     self.log(f"Error descargando XML de AP {ip}: {e}", "error")
 
             sm_xmls = {}
+            if completed_sms:
+                self._update_status("downloading_sm_xml", progress=55)
             for ip in completed_sms:
                 try:
                     self.log(f"Esperando 5s antes de descargar de SM {ip}...")
@@ -332,7 +334,6 @@ class ScanTask:
                 raise Exception("No se pudieron descargar XMLs de ningun AP")
 
             self.log(f"XMLs descargados: {len(ap_xmls)} APs, {len(sm_xmls)} SMs")
-            self.progress = 60
 
             # Fase 3: Analisis de frecuencias
             self._update_status("analyzing", progress=60)
@@ -344,6 +345,7 @@ class ScanTask:
 
             if self.analysis_mode == "AP_SM_CROSS" and sm_xmls:
                 # ANALISIS CRUZADO AP-SM
+                self._update_status("analyzing_sms_cross", progress=60)
                 logger.info(f"[{self.scan_id}] Ejecutando analisis cruzado AP-SM...")
 
                 band_config = {
@@ -609,10 +611,14 @@ class ScanTask:
                         }
 
                     progress_increment = 30 / len(completed_aps)
-                    self.progress = 60 + int((i + 1) * progress_increment)
+                    self._update_status(
+                        "analyzing_sms_cross",
+                        progress=60 + int((i + 1) * progress_increment),
+                    )
 
             else:
                 # ANALISIS SOLO DE AP (modo original)
+                self._update_status("analyzing_ap", progress=60)
                 logger.info(f"[{self.scan_id}] Ejecutando analisis solo de AP...")
 
                 band_config = {
@@ -660,7 +666,12 @@ class ScanTask:
                             )
 
                     progress_increment = 30 / len(completed_aps)
-                    self.progress = 60 + int((i + 1) * progress_increment)
+                    self._update_status(
+                        "analyzing_ap",
+                        progress=60 + int((i + 1) * progress_increment),
+                    )
+
+            self._update_status("saving_results", progress=95)
 
             # Compilar resultados finales
             self.results = {
@@ -699,8 +710,6 @@ class ScanTask:
                 f"{len(failed_aps)} APs, {len(failed_sms)} SMs"
             )
 
-            self.status = "completed"
-            self.progress = 100
             logger.info(f"[{self.scan_id}] Escaneo completado exitosamente")
 
             # Persist to DB storage
@@ -730,7 +739,10 @@ class ScanTask:
 
             # Tarea 3.2: disparar apply si aplica
             if auto_apply_enabled and self.storage_manager is not None:
+                self._update_status("auto_apply_optional", progress=98)
                 self._run_auto_apply(analysis_results)
+
+            self._update_status("completed", progress=100)
 
             # Cerrar auditoria con resultado exitoso
             if self.audit_manager:

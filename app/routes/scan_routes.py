@@ -70,6 +70,27 @@ def save_scan(scan_id: str, scan_data: dict):
     pass
 
 
+def _scan_progress(scan_data: dict, default: int = 0) -> int:
+    """Return persisted progress from either a direct field or config.progress."""
+    progress = scan_data.get("progress")
+    if progress is None:
+        config = scan_data.get("config") or {}
+        progress = config.get("progress") if isinstance(config, dict) else None
+    try:
+        return int(progress if progress is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _scan_analysis_mode(scan_data: dict) -> str:
+    """Return API-facing analysis mode from persisted scan data."""
+    config = scan_data.get("config") or {}
+    if isinstance(config, dict) and config.get("analysis_mode"):
+        return config["analysis_mode"]
+    scan_type = scan_data.get("scan_type")
+    return scan_type if scan_type in {"AP_SM_CROSS", "AP_ONLY"} else "AP_ONLY"
+
+
 def get_stored_scans():
     """Legacy stub — returns empty dict (use ScanStorageManager via app.config instead)."""
     return {}
@@ -317,7 +338,7 @@ def get_scan_status(scan_id: str):
     response = {
         "scan_id": scan_id,
         "status": scan_data.get("status", "unknown"),
-        "progress": scan_data.get("progress", 0),
+        "progress": _scan_progress(scan_data),
         "error": scan_data.get("error"),
         "logs": scan_data.get("logs") or [],
     }
@@ -446,7 +467,7 @@ def get_scan_results(scan_id: str):
             {
                 "error": "Scan aun no completado",
                 "status": scan_data.get("status", "unknown"),
-                "progress": scan_data.get("progress", 0),
+                "progress": _scan_progress(scan_data),
             }
         ), 400
 
@@ -468,6 +489,11 @@ def list_scans():
     # 1. Scans from in-memory (real-time state)
     for scan_id, scan_data in active_scans.items():
         task = scan_data["task"]
+        analysis_mode = getattr(task, "analysis_mode", None) or scan_data.get(
+            "analysis_mode", "AP_ONLY"
+        )
+        if analysis_mode not in {"AP_SM_CROSS", "AP_ONLY"}:
+            analysis_mode = "AP_ONLY"
         scans.append(
             {
                 "scan_id": scan_id,
@@ -475,6 +501,7 @@ def list_scans():
                 "status": task.status,
                 "progress": task.progress,
                 "ap_count": len(scan_data["ap_ips"]),
+                "analysis_mode": analysis_mode,
                 "username": scan_data.get("username", "unknown"),
                 "ticket_id": scan_data.get("ticket_id", 0),
             }
@@ -496,10 +523,11 @@ def list_scans():
                     "scan_id": s_id,
                     "created_at": scan_row.get("started_at", ""),
                     "status": scan_row.get("status", "unknown"),
-                    "progress": 0,
+                    "progress": _scan_progress(scan_row),
                     "ap_count": ap_count,
-                "username": scan_row.get("username", "unknown"),
-                "ticket_id": scan_row.get("ticket_id", 0),
+                    "analysis_mode": _scan_analysis_mode(scan_row),
+                    "username": scan_row.get("username", "unknown"),
+                    "ticket_id": scan_row.get("ticket_id", 0),
                 }
             )
 
