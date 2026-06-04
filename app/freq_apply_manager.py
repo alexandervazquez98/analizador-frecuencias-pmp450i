@@ -39,7 +39,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from app.freq_utils import mhz_to_khz
+from app.freq_utils import khz_to_mhz, mhz_to_khz
 from app.audit_manager_v2 import AuditManagerV2
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,11 @@ _VIABILITY_SCORE_THRESHOLD = 0.65
 
 # Maximum number of entries kept in the SM rfScanList after merging (firmware limit).
 SM_SCAN_LIST_MAX_ENTRIES = 8
+
+# Technical PMP450i 3 GHz hardware band. Used as a last-mile safety check before
+# SNMP SETs because Cambium validates rfFreqCarrier against current channel width.
+BAND_3GHZ_MIN_MHZ = 3300.0
+BAND_3GHZ_MAX_MHZ = 3900.0
 
 
 class FrequencyApplyManager:
@@ -526,7 +531,119 @@ class FrequencyApplyManager:
                 "errors": errors,
             }
 
-        # ── Step 4: SET rfFreqCarrier on AP (AP-last, only after SM verify) ──
+        # ── Step 4: SET AP channel/frequency safely (AP-last after SM verify) ──
+        channel_width_result = None
+        ap_freq_mhz = khz_to_mhz(freq_khz)
+
+        try:
+            pre_bw_required, pre_bw_reason = self._requires_pre_frequency_bandwidth_set(
+                freq_mhz=ap_freq_mhz,
+                target_width=channel_width,
+                current_width=self._get_current_ap_channel_width(ap_ip),
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+            ap_result = {"success": False, "error": str(exc)}
+            ap_result_json = json.dumps(ap_result)
+            self._db.update_frequency_apply_status(
+                apply_id=apply_id,
+                state="failed",
+                ap_result=ap_result_json,
+                sm_results=sm_results_json,
+                error="; ".join(errors),
+                completed=True,
+            )
+            self._log_audit(
+                apply_id=apply_id,
+                scan_id=scan_id,
+                tower_id=tower_id,
+                freq_khz=freq_khz,
+                applied_by=applied_by,
+                final_state="failed",
+                sm_count=len(sm_ips),
+                failed_sm_count=len(sm_failures),
+                skipped_sm_count=len(sm_skipped),
+                ap_success=False,
+                errors=errors,
+            )
+            return {
+                "success": False,
+                "apply_id": apply_id,
+                "state": "failed",
+                "freq_khz": freq_khz,
+                "channel_width_mhz": channel_width,
+                "channel_width_result": None,
+                "contention_slots_ok": None,
+                "broadcast_retry_ok": None,
+                "reboot_ok": None,
+                "sm_results": sm_results,
+                "ap_result": ap_result,
+                "errors": errors,
+            }
+        if pre_bw_required and channel_width:
+            logger.info(
+                "[APPLY %d] AP %s: pre-setting channelBandwidth=%d MHz before "
+                "rfFreqCarrier to avoid band-edge wrongValue (%s)",
+                apply_id,
+                ap_ip,
+                channel_width,
+                pre_bw_reason,
+            )
+            bw_success, bw_msg = self._scanner.set_channel_width(
+                ap_ip, channel_width, ap_freq_mhz=ap_freq_mhz
+            )
+            channel_width_result = {
+                "success": bw_success,
+                "error": bw_msg if not bw_success else None,
+                "applied_before_frequency": True,
+                "reason": pre_bw_reason,
+            }
+            if not bw_success:
+                errors.append(f"channel_width {ap_ip}: {bw_msg}")
+                ap_result = {
+                    "success": False,
+                    "error": (
+                        "AP frequency change blocked because required pre-frequency "
+                        f"channel width SET failed: {bw_msg}"
+                    ),
+                }
+                ap_result_json = json.dumps(ap_result)
+                self._db.update_frequency_apply_status(
+                    apply_id=apply_id,
+                    state="failed",
+                    ap_result=ap_result_json,
+                    sm_results=sm_results_json,
+                    error="; ".join(errors),
+                    completed=True,
+                )
+                self._log_audit(
+                    apply_id=apply_id,
+                    scan_id=scan_id,
+                    tower_id=tower_id,
+                    freq_khz=freq_khz,
+                    applied_by=applied_by,
+                    final_state="failed",
+                    sm_count=len(sm_ips),
+                    failed_sm_count=len(sm_failures),
+                    skipped_sm_count=len(sm_skipped),
+                    ap_success=False,
+                    errors=errors,
+                )
+                return {
+                    "success": False,
+                    "apply_id": apply_id,
+                    "state": "failed",
+                    "freq_khz": freq_khz,
+                    "channel_width_mhz": channel_width,
+                    "channel_width_result": channel_width_result,
+                    "contention_slots_ok": None,
+                    "broadcast_retry_ok": None,
+                    "reboot_ok": None,
+                    "sm_results": sm_results,
+                    "ap_result": ap_result,
+                    "errors": errors,
+                }
+
         ap_success, ap_msg = self._scanner.set_frequency(ap_ip, freq_khz)
         ap_result = {"success": ap_success, "error": ap_msg if not ap_success else None}
         ap_result_json = json.dumps(ap_result)
@@ -539,17 +656,15 @@ class FrequencyApplyManager:
             errors.append(f"AP {ap_ip}: {ap_msg}")
             logger.error("[APPLY %d] AP %s failed: %s", apply_id, ap_ip, ap_msg)
 
-        # ── Step 4b: SET channel_width (opcional, si se provee) ───────────
-        channel_width_result = None
-        if channel_width and ap_success:
-            # Pasar freq_mhz para detectar banda (3GHz vs 4/5GHz) sin GET extra
-            ap_freq_mhz = freq_khz / 1000.0  # freq_khz ya está en kHz
+        # ── Step 4b: SET channel_width after frequency unless it was already needed before ──
+        if channel_width and ap_success and channel_width_result is None:
             bw_success, bw_msg = self._scanner.set_channel_width(
                 ap_ip, channel_width, ap_freq_mhz=ap_freq_mhz
             )
             channel_width_result = {
                 "success": bw_success,
                 "error": bw_msg if not bw_success else None,
+                "applied_before_frequency": False,
             }
             if bw_success:
                 logger.info(
@@ -711,6 +826,77 @@ class FrequencyApplyManager:
         except Exception as exc:
             logger.debug("[APPLY] Could not read prev AP freq from %s: %s", ap_ip, exc)
         return None
+
+    def _get_current_ap_channel_width(self, ap_ip: str) -> Optional[int]:
+        """GET current AP channel width in MHz. Returns None on any failure."""
+        oid = "1.3.6.1.4.1.161.19.3.3.2.83.0"  # channelBandwidth.0
+        try:
+            if hasattr(self._scanner, "_snmp_get_oid"):
+                success, value, _msg = self._scanner._snmp_get_oid(ip=ap_ip, oid=oid)
+            else:
+                success, value, _msg = self._scanner._snmp_get(ip=ap_ip, oid=oid)
+            if not success or value is None:
+                return None
+            text = str(value).replace("MHz", "").strip()
+            return int(float(text))
+        except Exception as exc:
+            logger.debug("[APPLY] Could not read AP channel width from %s: %s", ap_ip, exc)
+        return None
+
+    def _requires_pre_frequency_bandwidth_set(
+        self,
+        freq_mhz: float,
+        target_width: Optional[int],
+        current_width: Optional[int],
+    ) -> Tuple[bool, str]:
+        """Decide whether AP bandwidth must be set before rfFreqCarrier.
+
+        Cambium validates rfFreqCarrier against the AP's current channel width.
+        Near 3300/3900 MHz, a center frequency can be valid for the target width
+        but invalid for the current wider width. In that case, set the target
+        width first to avoid SNMP wrongValue.
+        """
+        if target_width is None:
+            return False, "no target channel width"
+
+        if not self._is_3ghz_frequency(freq_mhz):
+            return False, "target frequency is outside 3 GHz policy band"
+
+        if not self._channel_fits_3ghz_band(freq_mhz, target_width):
+            raise ValueError(
+                f"Frequency {freq_mhz:g} MHz with {target_width} MHz channel width "
+                f"does not fit inside {BAND_3GHZ_MIN_MHZ:g}-{BAND_3GHZ_MAX_MHZ:g} MHz"
+            )
+
+        if current_width is not None:
+            if self._channel_fits_3ghz_band(freq_mhz, current_width):
+                return False, f"target frequency fits current width {current_width} MHz"
+            return (
+                True,
+                f"target frequency fits {target_width} MHz but not current {current_width} MHz",
+            )
+
+        wider_widths = [20, 30, 40]
+        risky_widths = [bw for bw in wider_widths if bw > target_width]
+        if any(not self._channel_fits_3ghz_band(freq_mhz, bw) for bw in risky_widths):
+            return (
+                True,
+                "current AP width unknown and target is near a 3 GHz band edge",
+            )
+
+        return False, "target frequency fits all wider supported widths"
+
+    @staticmethod
+    def _is_3ghz_frequency(freq_mhz: float) -> bool:
+        return BAND_3GHZ_MIN_MHZ <= freq_mhz <= BAND_3GHZ_MAX_MHZ
+
+    @staticmethod
+    def _channel_fits_3ghz_band(freq_mhz: float, width_mhz: int) -> bool:
+        half_width = width_mhz / 2.0
+        return (
+            freq_mhz - half_width >= BAND_3GHZ_MIN_MHZ
+            and freq_mhz + half_width <= BAND_3GHZ_MAX_MHZ
+        )
 
     def _log_audit(
         self,

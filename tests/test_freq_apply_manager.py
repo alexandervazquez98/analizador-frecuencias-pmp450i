@@ -43,6 +43,7 @@ def scanner():
     mock.set_broadcast_retry.return_value = (True, "OK")
     mock.reboot_if_required.return_value = (True, "OK")
     mock._snmp_get.return_value = (True, 5180000, "OK")
+    mock._snmp_get_oid.return_value = (False, "", "not configured")
     # Make-before-break GET stubs — return empty current config by default
     mock.get_sm_scan_list.return_value = (True, [], "OK")
     mock.get_sm_bandwidth_scan.return_value = (True, [], "OK")
@@ -595,6 +596,107 @@ class TestBandwidthApply:
 
         assert result["state"] == "completed"
         assert result["success"] is True
+
+    def test_pre_sets_narrower_ap_width_before_edge_frequency(self, manager, db, scanner):
+        """
+        GIVEN target 3892.5/15 fits 3 GHz but not the AP current 20 MHz width
+        THEN channel width is set before rfFreqCarrier to avoid Cambium wrongValue.
+        """
+        call_order = []
+        scanner.RF_FREQ_CARRIER_OID = "rfFreqCarrier"
+        scanner._snmp_get.return_value = (True, 3650000, "OK")
+        scanner._snmp_get_oid.return_value = (True, "20.0 MHz", "OK")
+        scanner.set_channel_width.side_effect = lambda *a, **kw: (
+            call_order.append("SET_BW_AP"),
+            (True, "OK"),
+        )[1]
+        scanner.set_frequency.side_effect = lambda *a, **kw: (
+            call_order.append("SET_FREQ_AP"),
+            (True, "OK"),
+        )[1]
+        _insert_scan(
+            db,
+            "BW_EDGE",
+            ["192.168.1.10"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+
+        result = manager.run_apply(
+            "BW_EDGE",
+            3892.5,
+            "TORRE-01",
+            "admin",
+            force=False,
+            channel_width_mhz=15.0,
+        )
+
+        assert result["state"] == "completed"
+        assert call_order == ["SET_BW_AP", "SET_FREQ_AP"]
+        assert result["channel_width_result"]["applied_before_frequency"] is True
+
+    def test_blocks_3ghz_frequency_that_does_not_fit_target_width(self, manager, db, scanner):
+        """
+        GIVEN target 3892.5/20 exceeds 3900 MHz channel edge
+        THEN apply fails before sending rfFreqCarrier to the AP.
+        """
+        scanner.RF_FREQ_CARRIER_OID = "rfFreqCarrier"
+        scanner._snmp_get.return_value = (True, 3650000, "OK")
+        scanner._snmp_get_oid.return_value = (True, "20.0 MHz", "OK")
+        _insert_scan(
+            db,
+            "BW_EDGE_INVALID",
+            ["192.168.1.10"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+
+        result = manager.run_apply(
+            "BW_EDGE_INVALID",
+            3892.5,
+            "TORRE-01",
+            "admin",
+            force=False,
+            channel_width_mhz=20.0,
+        )
+
+        assert result["state"] == "failed"
+        assert "does not fit" in result["ap_result"]["error"]
+        scanner.set_frequency.assert_not_called()
+
+    def test_pre_width_result_is_preserved_when_edge_frequency_fails(self, manager, db, scanner):
+        """
+        GIVEN pre-width SET succeeds but rfFreqCarrier still fails
+        THEN final state is failed and the pre-width result remains visible.
+        """
+        scanner.RF_FREQ_CARRIER_OID = "rfFreqCarrier"
+        scanner._snmp_get.return_value = (True, 3650000, "OK")
+        scanner._snmp_get_oid.return_value = (True, "20.0 MHz", "OK")
+        scanner.set_frequency.return_value = (False, "SNMP Error: wrongValue")
+        _insert_scan(
+            db,
+            "BW_EDGE_FREQ_FAIL",
+            ["192.168.1.10"],
+            results={
+                "best_combined_frequency": {"is_viable": True, "combined_score": 0.90}
+            },
+        )
+
+        result = manager.run_apply(
+            "BW_EDGE_FREQ_FAIL",
+            3892.5,
+            "TORRE-01",
+            "admin",
+            force=False,
+            channel_width_mhz=15.0,
+        )
+
+        assert result["state"] == "failed"
+        assert result["channel_width_result"]["success"] is True
+        assert result["channel_width_result"]["applied_before_frequency"] is True
+        assert result["ap_result"]["error"] == "SNMP Error: wrongValue"
 
 
 # ── Make-Before-Break ─────────────────────────────────────────────────────────

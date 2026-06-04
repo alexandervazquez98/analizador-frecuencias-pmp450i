@@ -8,7 +8,7 @@ import math
 import pandas as pd
 import numpy as np
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple, cast
 from dataclasses import dataclass, field
 from app.frequency_analyzer import FrequencyAnalyzer, SpectrumPoint
 
@@ -213,8 +213,10 @@ class APSMCrossAnalyzer:
             target_rx_level: RSSI esperado del enlace configurado por el operador (dBm).
         """
         all_results = []
-        # Evaluar solo BWs dentro del rango operativo (>= min_channel_width)
-        all_bandwidths = [20, 15, 10, 5]
+        # Evaluar solo BWs soportados para recomendaciones PMP450i.
+        # 7 MHz se omite deliberadamente por decisión operativa: aunque el
+        # hardware 3 GHz lo soporta, no debe entrar al ranking automático.
+        all_bandwidths = [40, 30, 20, 15, 10, 5]
         bandwidths = [bw for bw in all_bandwidths if bw >= min_channel_width]
 
         logger.info(
@@ -274,11 +276,11 @@ class APSMCrossAnalyzer:
         cross_results = []
 
         for idx, row in top_ap_frequencies.iterrows():
-            freq = row["Frecuencia Central (MHz)"]
-            ap_score = row["Puntaje Final"]
-            ap_noise = row["Ruido Promedio (dBm)"]
-            throughput = row.get("Throughput Est. (Mbps)", 0)
-            snr = row.get("SNR Estimado (dB)", 0)
+            freq = float(cast(Any, row["Frecuencia Central (MHz)"]))
+            ap_score = float(cast(Any, row["Puntaje Final"]))
+            ap_noise = float(cast(Any, row["Ruido Promedio (dBm)"]))
+            throughput = float(cast(Any, row.get("Throughput Est. (Mbps)", 0)) or 0)
+            snr = float(cast(Any, row.get("SNR Estimado (dB)", 0)) or 0)
 
             result = self._analyze_frequency_in_sms(
                 freq,

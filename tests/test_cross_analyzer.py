@@ -575,6 +575,41 @@ class TestMultibandAnalysis:
         assert result.sm_details[0]["capacity_estimated_mbps"] == 0.0
         assert result.sm_details[0]["reason"] == "Sin datos en ventana de canal"
 
+    def test_multiband_recommendations_include_30_and_40_mhz(self):
+        """
+        GIVEN wide-channel PMP450i operation is allowed
+        WHEN multiband AP-SM recommendations are generated
+        THEN 30 MHz and 40 MHz are evaluated as recommendation candidates.
+        """
+        ap_spectrum = make_ap_spectrum(count=40)
+        sms = [make_sm_data("10.0.0.1", count=40)]
+
+        analyzer = APSMCrossAnalyzer()
+        _, results = analyzer.analyze_multiband_ap_with_sms(
+            ap_spectrum, sms, top_n=1, min_channel_width=30, target_rx_level=-52
+        )
+
+        widths = {r.bandwidth for r in results}
+        assert widths == {30, 40}
+
+    def test_multiband_recommendations_omit_7_mhz(self):
+        """
+        GIVEN 7 MHz is intentionally excluded from automatic recommendations
+        WHEN all low-width candidates are allowed
+        THEN 7 MHz is not part of the evaluated recommendation widths.
+        """
+        ap_spectrum = make_ap_spectrum(count=40)
+        sms = [make_sm_data("10.0.0.1", count=40)]
+
+        analyzer = APSMCrossAnalyzer()
+        _, results = analyzer.analyze_multiband_ap_with_sms(
+            ap_spectrum, sms, top_n=1, min_channel_width=5, target_rx_level=-52
+        )
+
+        widths = {r.bandwidth for r in results}
+        assert {5, 10, 15, 20, 30, 40}.issubset(widths)
+        assert 7 not in widths
+
 
 class TestBandFilter:
     """Regresión: APSMCrossAnalyzer debe respetar el filtro de banda 3GHz."""
