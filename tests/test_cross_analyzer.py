@@ -555,6 +555,68 @@ class TestMultibandAnalysis:
         assert best is not None
         assert best.bandwidth == 20
 
+    def test_default_cross_analysis_does_not_hide_viable_sm_candidate_behind_ap_top_n(self):
+        """
+        GIVEN the AP-only best window is noisy for the SM
+        AND a lower AP-only score window is clean for the SM
+        WHEN no top_n limit is provided
+        THEN cross-analysis finds the viable SM-safe window instead of AP-only fallback.
+        """
+        ap_spectrum = []
+        sm_spectrum = []
+        for i in range(60):
+            freq = 5000.0 + i * 2.5
+            ap_noise = -95.0 if freq < 5040.0 else (-80.0 if 5060.0 <= freq <= 5090.0 else -70.0)
+            sm_noise = -55.0 if freq < 5040.0 else (-95.0 if 5060.0 <= freq <= 5090.0 else -70.0)
+            ap_spectrum.append(
+                SpectrumPoint(freq, ap_noise, ap_noise, ap_noise, ap_noise)
+            )
+            sm_spectrum.append(
+                SpectrumPoint(freq, sm_noise, sm_noise, sm_noise, sm_noise)
+            )
+
+        analyzer = APSMCrossAnalyzer(config={"min_snr": 18})
+        _, limited_results = analyzer.analyze_ap_with_sms(
+            ap_spectrum,
+            [SMSpectrumData("10.0.0.1", sm_spectrum)],
+            top_n=1,
+            bandwidth=20,
+            target_rx_level=-52,
+        )
+        _, full_results = analyzer.analyze_ap_with_sms(
+            ap_spectrum,
+            [SMSpectrumData("10.0.0.1", sm_spectrum)],
+            top_n=None,
+            bandwidth=20,
+            target_rx_level=-52,
+        )
+
+        limited_best = analyzer.get_best_combined_frequency(limited_results)
+        full_best = analyzer.get_best_combined_frequency(full_results)
+
+        assert limited_best is not None
+        assert limited_best.is_viable is False
+        assert full_best is not None
+        assert full_best.is_viable is True
+        assert full_best.sm_count_sacrificed == 0
+        assert full_best.frequency >= 5060.0
+
+    def test_capacity_ok_display_is_not_yes_when_no_capacity_requirement(self):
+        """
+        GIVEN no sector throughput requirement is configured
+        THEN the DataFrame should show capacity as N/A, not a misleading OK.
+        """
+        ap_spectrum = make_ap_spectrum(count=20, v_max=-90.0, h_max=-90.0)
+        sms = [make_sm_data("10.0.0.1", count=20, v_max=-90.0, h_max=-90.0)]
+
+        analyzer = APSMCrossAnalyzer(config={"min_sector_throughput_mbps": 0})
+        df, _ = analyzer.analyze_ap_with_sms(
+            ap_spectrum, sms, top_n=1, bandwidth=20, target_rx_level=-52
+        )
+
+        assert df.iloc[0]["Capacidad Requerida (Mbps)"] == 0
+        assert df.iloc[0]["Capacidad OK"] == "N/A"
+
     def test_missing_sm_window_fails_capacity_gate(self):
         """
         GIVEN AP capacity is high but one SM has no data in the centered window

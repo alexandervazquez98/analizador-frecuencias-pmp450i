@@ -8,7 +8,6 @@ Design: change-005 design § D4.5 — Scan Module Split
 """
 
 import asyncio
-import threading
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -73,7 +72,9 @@ class ScanTask:
         else:
             logger.info(log_msg)
 
-    def _update_status(self, status: str, progress: int = None, error: str = None):
+    def _update_status(
+        self, status: str, progress: Optional[int] = None, error: Optional[str] = None
+    ):
         """Update status in memory and optionally in DB storage."""
         self.status = status
         if progress is not None:
@@ -491,7 +492,7 @@ class ScanTask:
                             cross_analyzer.analyze_multiband_ap_with_sms(
                                 ap_spectrum,
                                 sm_data,
-                                top_n=20,
+                                top_n=None,
                                 min_channel_width=self.config.get(
                                     "min_channel_width", 15
                                 ),
@@ -527,6 +528,15 @@ class ScanTask:
                                 }
                                 for p in sm.spectrum_points
                             ]
+
+                        # Keep the full candidate set for selection, but cap serialized
+                        # debug payload to protect SQLite/API response size. The best
+                        # candidate is stored separately in best_combined_frequency.
+                        serialized_cross_results = sorted(
+                            cross_results,
+                            key=lambda r: (r.is_viable, r.combined_score),
+                            reverse=True,
+                        )[:100]
 
                         analysis_results[ap_ip] = {
                             "mode": "AP_SM_CROSS",
@@ -611,8 +621,11 @@ class ScanTask:
                                     "capacity_margin_mbps": r.capacity_margin_mbps,
                                     "capacity_ok": r.capacity_ok,
                                 }
-                                for r in cross_results
+                                for r in serialized_cross_results
                             ],
+                            "all_cross_results_total": len(cross_results),
+                            "all_cross_results_truncated": len(cross_results)
+                            > len(serialized_cross_results),
                             "raw_spectrum": raw_spectrum_data,
                         }
 

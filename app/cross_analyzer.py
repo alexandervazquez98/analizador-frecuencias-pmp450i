@@ -199,7 +199,7 @@ class APSMCrossAnalyzer:
         self,
         ap_spectrum: List[SpectrumPoint],
         sm_data: List[SMSpectrumData],
-        top_n: int = 5,
+        top_n: Optional[int] = None,
         min_channel_width: int = 15,
         target_rx_level: float = -52.0,
     ) -> Tuple[pd.DataFrame, List[CrossAnalysisResult]]:
@@ -253,7 +253,7 @@ class APSMCrossAnalyzer:
         self,
         ap_spectrum: List[SpectrumPoint],
         sm_data: List[SMSpectrumData],
-        top_n: int = 5,
+        top_n: Optional[int] = None,
         bandwidth: int = 20,
         target_rx_level: float = -52.0,
     ) -> Tuple[pd.DataFrame, List[CrossAnalysisResult]]:
@@ -269,8 +269,15 @@ class APSMCrossAnalyzer:
         if ap_ranking.empty:
             return pd.DataFrame(), []
 
-        # PASO 2: Obtener top N frecuencias candidatas del AP
-        top_ap_frequencies = ap_ranking.head(top_n)
+        # PASO 2: Obtener frecuencias candidatas del AP.
+        # Importante: no limitar por defecto a un top-N AP-only. En campo vimos
+        # que una frecuencia AP apenas peor puede ser mucho mejor para los SMs;
+        # si se descarta antes del cruce, el sistema puede terminar recomendando
+        # un candidato NO VIABLE aunque exista uno viable.
+        if top_n is None or top_n <= 0:
+            top_ap_frequencies = ap_ranking
+        else:
+            top_ap_frequencies = ap_ranking.head(top_n)
 
         # PASO 3: Cruzar con datos de SMs
         cross_results = []
@@ -618,7 +625,9 @@ class APSMCrossAnalyzer:
                     "Capacidad Requerida (Mbps)": r.capacity_required_mbps,
                     "Capacidad Estimada (Mbps)": r.capacity_estimated_mbps,
                     "Margen Capacidad (Mbps)": r.capacity_margin_mbps,
-                    "Capacidad OK": "Sí" if r.capacity_ok else "No",
+                    "Capacidad OK": (
+                        "N/A" if r.capacity_required_mbps <= 0 else ("Sí" if r.capacity_ok else "No")
+                    ),
                     "Ruido AP (dBm)": round(r.ap_noise_avg, 2),
                     "SNR Estimado AP (dB)": round(r.ap_snr, 2),
                     "Peor Ruido SMs (dBm)": round(r.sm_worst_noise, 2),
@@ -748,7 +757,7 @@ def analyze_ap_and_sms(
         # Para mantener compatibilidad, hacemos análisis multibanda del AP solo
         logger.info("Analizando AP Multibanda (Sin SMs)...")
         results = []
-        for bw in [20, 15, 10, 5]:
+        for bw in [40, 30, 20, 15, 10, 5]:
             df = freq_analyzer.analyze_spectrum(ap_spectrum, bandwidth=bw)
             if not df.empty:
                 best = df.iloc[0].to_dict()
@@ -769,7 +778,7 @@ def analyze_ap_and_sms(
     df_combined, cross_results = analyzer.analyze_multiband_ap_with_sms(
         ap_spectrum,
         sm_data,
-        top_n=20,  # Increase to 20 per BW (Total ~80 candidates potentially)
+        top_n=None,
     )
 
     best_combined = analyzer.get_best_combined_frequency(cross_results)
